@@ -32,5 +32,6 @@
 
 # TODOs
 - less blocking, more DMA and IRQs
+- in-runtime-settable logging
 - SPI instead of UART
 - MAC logic
