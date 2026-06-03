@@ -21,4 +21,10 @@
 - as mentioned above; P0.28 is the UART TX of the DECT and P0.29 is the UART RX. so connect DECT P0.28 to Pico GP16, and DECT P0.29 to Pico GP17. Baud rate is 1000000. 
 - Code could use improvements; namely - a cleanup, - DMA based everything, - SPI instead of UART, - MAC logic
 
-
+# Some notes
+- PC <---> Pico <---> DECT <---> DECT <---> Pico <---> Pc
+- Pico sends every ethernet packet it receives from the PC to the DECT, thru the UART lines. 
+- It adds a 6 byte header to every eth packet when it does so: 
+- \[4 byte magic number]\[2 byte payload length]\[x byte eth packet]
+- This header is only there when the packet flows between DECTs and Picos. Not between the PC and Pico connection. 
+- The logic on the DECT side is very dumb: it sends over every byte. encapsulation and deencapsulation is left to the Pico
