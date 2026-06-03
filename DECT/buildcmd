@@ -1,0 +1,1 @@
+west build -p -b nrf9151dk/nrf9151/ns -- -DEXTRA_CONF_FILE=overlay-eu.conf -DDTC_OVERLAY_FILE=dongle.overlay

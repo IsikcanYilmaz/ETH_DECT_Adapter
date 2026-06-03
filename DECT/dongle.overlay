@@ -1,0 +1,10 @@
+/*
+Enable uart1
+*/
+
+&uart1 {
+	status="okay";
+	/* current-speed= <921600>; */
+	current-speed=<1000000>;
+};
+
