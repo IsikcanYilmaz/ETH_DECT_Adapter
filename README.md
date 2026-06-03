@@ -13,7 +13,7 @@
 
 # nRF9151DK side:
 - Tested on sdk version v3.2.0-rc2, though should work on other versions.
-- run the `nrfutil sdk-manager toolchain launch --ncs-version "v3.2.0-rc2" --shell` command to drop into nrf's build environment
+- run the `nrfutil sdk-manager toolchain launch --ncs-version "v3.2.0-rc2" --shell` command to drop into nrf's build environment. you will do compilation and flashing from this environment
 - in DECT/ do:
 - `west build -p -b nrf9151dk/nrf9151/ns -- -DEXTRA_CONF_FILE=overlay-eu.conf -DDTC_OVERLAY_FILE=dongle.overlay`
 - the `dongle.overlay` file defines the UART settings and enables it. the overlay-eu.conf may or may not be needed
