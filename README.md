@@ -29,3 +29,8 @@
 - \[4 byte magic number]\[2 byte payload length]\[x byte eth packet]
 - This header is only there when the packet flows between DECTs and Picos. Not between the PC and Pico connection. 
 - The logic on the DECT side is very dumb: it sends over every byte. encapsulation and deencapsulation is left to the Pico
+
+# TODOs
+- less blocking, more DMA and IRQs
+- SPI instead of UART
+- MAC logic
