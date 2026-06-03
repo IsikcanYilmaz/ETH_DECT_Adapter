@@ -1,7 +1,8 @@
 # ETH_DECT_Adapter
 
 # Pico side:
-- As an env variable have PICO_SDK_PATH point to pico-sdk
+- download pico-sdk
+- As an env variable have PICO_SDK_PATH point to pico-sdk's path
 - building:
 - in pico_usb_ecm/ do:
 - `mkdir build; cd build; cmake ..; make` this will compile the code and output a uf2 file. 
