@@ -2,7 +2,7 @@
 #include "dect_phy_events.h"
 #include "tdma.h"
 
-LOG_MODULE_REGISTER(dect_serial,LOG_LEVEL_ERR);
+LOG_MODULE_REGISTER(dect_serial,LOG_LEVEL_INF);
 
 #define PAYLOAD_MAX 141 // MCS 3 with ss len 2
 #define DECT_LEN_PREFIX 2
@@ -131,7 +131,8 @@ void serial_on_pdc(const struct nrf_modem_dect_phy_pdc_event *evt)
   {
 		return;
 	}
-	LOG_DBG("PDC event received: len=%d", evt->len);
+
+	LOG_INF("PDC event received: len=%d", evt->len);
 
 	const uint8_t *data = (const uint8_t *)evt->data;
 
@@ -170,11 +171,16 @@ void serial_on_pdc(const struct nrf_modem_dect_phy_pdc_event *evt)
 
 void sink_serial_on_pdc(const struct nrf_modem_dect_phy_pdc_event *evt)
 {	
-  LOG_DBG("PDC event received: len=%d", evt->len);
+  LOG_INF("PDC event received: len=%d", evt->len);
 
 	const uint8_t *data = (const uint8_t *)evt->data;
 
 	LOG_HEXDUMP_INF(data, evt->len, "PDC EVENT");
 
   serial_write(data, evt->len);
+}
+
+void test_on_pdc(const struct nrf_modem_dect_phy_pdc_event *evt)
+{
+  //
 }

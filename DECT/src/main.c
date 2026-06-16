@@ -13,7 +13,9 @@
 #include "tdma.h"
 #include "led.h"
 
-LOG_MODULE_REGISTER(app,LOG_LEVEL_ERR);
+#include "tester.h"
+
+LOG_MODULE_REGISTER(app,LOG_LEVEL_INF);
 
 /*******************************************//**
  *  ... BUTTON SETUP
@@ -27,7 +29,7 @@ BUTTON_DEFINE_DT(button4, DT_ALIAS(sw3), pressed);
 
 K_SEM_DEFINE(test_sem,    0, 1);
 
-static const char *teststr = "ASDFQWERASDFQWERASDFQWERASDFQWERASDFQWERASDFQWERASDFQWERASDFQWER";
+static const char *teststr = "ASDFQWERASDFQWERASDFQWERASDFQWERASDFQWERASDFQWERASDFQWERASDFQWERASDFQWERASDFQWERASDFQWERASDFQWERASDFQWERASDFQWERASDFQWERASDFQWERASDFQWERASDFQWERASDFQWERASDFQWERASDFQWERASDFQWERASDFQWERASDFQWERASDFQWERASDFQWERASDFQWERASDFQWERASDFQWERASDFQWERASDFQWERASDFQWER";
 void pressed(const struct device *dev, struct gpio_callback *cb, uint32_t pins)
 {
 	// TODO probably better way to do this mapping
@@ -43,15 +45,17 @@ void pressed(const struct device *dev, struct gpio_callback *cb, uint32_t pins)
 	}
 	else if (pins == (1 << button3.spec.pin))
 	{
-		mode = SINK;
-		LOG_INF("MODE SINK");
+		// mode = SINK;
+		// LOG_INF("MODE SINK");
+    mode = TEST;
+    // testloop();
 	}
 	else if (pins == (1 << button4.spec.pin))
 	{
 		nrf_modem_dect_phy_time_get();
     static struct nrf_modem_dect_phy_hdr_type_1 tx_hdr = {
-      .packet_length      = 2,
-      .packet_length_type = 0x00,
+      .packet_length      = 1,
+      .packet_length_type = 0x01,
       .header_format      = 0x0,
       .short_network_id   = (CONFIG_NETWORK_ID & 0xff),
       .transmitter_id_hi  = (0 >> 8) & 0xff,
@@ -64,7 +68,7 @@ void pressed(const struct device *dev, struct gpio_callback *cb, uint32_t pins)
     uint64_t start_time = 0;
     LOG_INF("SENDING TEST PAYLOAD WITH %d USECOND DELAY", start_time);
     // k_sem_take(&tdma_sem, K_FOREVER);
-    dect_phy_tx(TX_HANDLE, &tx_hdr, 64, teststr, start_time);
+    dect_phy_tx(TX_HANDLE, &tx_hdr, 32, teststr, start_time);
     k_sem_take(&tdma_sem, K_FOREVER);
     k_sem_reset(&tdma_sem);
 	}
@@ -111,16 +115,16 @@ int main(void)
 	}
 	LOG_DBG("Device ID: 0x%04x", device_id);
 
-	while(mode == UNDEFINED_ROLE){
-		LOG_INF("BUTTON1 FOR MASTER, BUTTON2 FOR SLAVE, BUTTON3 FOR SINK");
-		k_sleep(K_MSEC(1000));
-	}
+  testloop(mode);
 
 	led_set((mode == MASTER) ? MASTER_LED_ID : SLAVE_LED_ID, true);
 
-	dect_events_register_pcc_handler(tdma_on_pcc);
+	// dect_events_register_pcc_handler(tdma_on_pcc);
 	// dect_events_register_pdc_handler(serial_on_pdc);
-	dect_events_register_pdc_handler(sink_serial_on_pdc);
+	// dect_events_register_pdc_handler(sink_serial_on_pdc);
+  
+  
+
 	LOG_DBG("Dect serial initialized");
 	init_tdma();
 	LOG_DBG("Tdma initialized ID");

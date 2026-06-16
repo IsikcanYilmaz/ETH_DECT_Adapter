@@ -26,6 +26,7 @@ typedef enum
 	MASTER,
 	SLAVE,
 	SINK, // TODO this is a temporary role just to test out Tx.
+  TEST, // 
 	ROLE_MAX,
 } Role_e;
 

@@ -21,4 +21,5 @@ target_sources(app PRIVATE
     src/tdma.c
     src/dect_uart.c
     src/led.c
+    src/tester.c
 )

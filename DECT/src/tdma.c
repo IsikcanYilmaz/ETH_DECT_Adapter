@@ -3,6 +3,8 @@
 #include "dect_phy_events.h"
 #include "dect_serial.h"
 
+LOG_MODULE_REGISTER(tdma, LOG_LEVEL_INF);
+
 uint8_t mode = UNDEFINED_ROLE;
 
 uint8_t sync_flag = 0;
@@ -15,12 +17,8 @@ uint8_t sync_flag = 0;
 #define TDMA_BUFFER_US         (200  * 1000)
 #define SAFTY_MARGIN_US        (800)
 
-#define TDMA_TOTAL_US \
-(TDMA_SYNC_US + TDMA_BUFFER_TX_US + TDMA_BUFFER_RX_US + \
-	TDMA_RX_US + TDMA_TX_US + TDMA_BUFFER_US)
+#define TDMA_TOTAL_US (TDMA_SYNC_US + TDMA_BUFFER_TX_US + TDMA_BUFFER_RX_US + TDMA_RX_US + TDMA_TX_US + TDMA_BUFFER_US)
 
-LOG_MODULE_REGISTER(tdma, LOG_LEVEL_ERR);
-//LOG_MODULE_REGISTER(tdma);
 #define TDMA_MAX_STATE_COUNT (TDMA_MAX_TRANSMISSIONS + 1 + 1) /* + MASTER: Send sync + BOTH: RX-Messages */
 
 uint64_t slave_frame_start = 0;
@@ -42,18 +40,6 @@ struct nrf_modem_dect_phy_hdr_type_1 sync_hdr = {
 	.reserved           = 0,
 	.transmit_power     = CONFIG_TX_POWER,
 };
-
-// static struct k_timer master_frame_timer;
-
-//static void master_frame_timer_cb(struct k_timer *timer)
-//{
-//    ARG_UNUSED(timer);
-//
-//    LOG_DBG("master_frame_timer_cb: periodic frame trigger");
-//
-//    schedule_master();
-//}
-
 
 // TODO not final positions. get shit working then make pretty
 #define PAYLOAD_MAX 141 // MCS 3 with ss len 2
@@ -132,6 +118,11 @@ void schedule_basic_sink(void)
   }
 }
 
+
+/* MASTER
+ */
+
+
 void schedule_master(void)
 {
 	while(1){
@@ -164,22 +155,6 @@ void schedule_master(void)
 		LOG_DBG("  sync_start_tick=%llu", sync_start_tick);
 		LOG_DBG("  tx_start_tick=%llu", tx_start_tick);
 		LOG_DBG("  rx_start_tick=%llu", rx_start_tick);
-		//uint64_t sync_tx_start_time =
-		//    sync_start_tick -
-		//    latency_info->operation.transmit.idle_to_active;
-
-		//uint64_t tx_start_time =
-		//    tx_start_tick -
-		//    latency_info->operation.transmit.idle_to_active;
-
-		//uint64_t rx_start_time =
-		//    rx_start_tick -
-		//    latency_info->operation.receive.idle_to_active;
-
-		//LOG_DBG("schedule_master: adjusted start times");
-		//LOG_DBG("  sync_tx_start_time=%llu", sync_tx_start_time);
-		//LOG_DBG("  tx_start_time=%llu", tx_start_time);
-		//LOG_DBG("  rx_start_time=%llu", rx_start_time);
 
 		char sync_buf[] = {0, 1, 9};
 
@@ -230,18 +205,12 @@ void schedule_slave(void)
 			int64_t propagation_delay_us =
 				get_delay_us(TDMA_SYNC_SS + 1);
 
-			LOG_DBG("propagation_delay_us = %lld",
-					 propagation_delay_us);
-			//slave_frame_start = slave_frame_start - US_TO_MODEM_TICKS(propagation_delay_us - SAFTY_MARGIN_US);
-			int64_t rx_offset_us =
-				TDMA_BUFFER_US +
-				TDMA_SYNC_US +
-				TDMA_BUFFER_RX_US;
+			LOG_DBG("propagation_delay_us = %lld", propagation_delay_us);
 
-			int64_t tx_offset_us =
-				rx_offset_us +
-				TDMA_RX_US +
-				TDMA_BUFFER_TX_US;
+			//slave_frame_start = slave_frame_start - US_TO_MODEM_TICKS(propagation_delay_us - SAFTY_MARGIN_US);
+			int64_t rx_offset_us = TDMA_BUFFER_US + TDMA_SYNC_US + TDMA_BUFFER_RX_US;
+
+			int64_t tx_offset_us = rx_offset_us + TDMA_RX_US + TDMA_BUFFER_TX_US;
 
 			LOG_DBG("rx_offset_us = %lld", rx_offset_us);
 			LOG_DBG("tx_offset_us = %lld", tx_offset_us);
@@ -254,15 +223,9 @@ void schedule_slave(void)
 				slave_frame_start +
 				US_TO_MODEM_TICKS(tx_offset_us);
 
-			LOG_DBG("slave_frame_start = %llu",
-					 slave_frame_start);
-
-			LOG_DBG("rx_start_time ticks = %llu",
-					 rx_start_time);
-
-			LOG_DBG("tx_start_time ticks = %llu",
-					 tx_start_time);
-
+			LOG_DBG("slave_frame_start = %llu",slave_frame_start);
+			LOG_DBG("rx_start_time ticks = %llu",rx_start_time);
+			LOG_DBG("tx_start_time ticks = %llu",tx_start_time);
 			LOG_DBG("TDMA_RX_US = %u", TDMA_RX_US);
 			LOG_DBG("TDMA_TX_US = %u", TDMA_TX_US);
 
