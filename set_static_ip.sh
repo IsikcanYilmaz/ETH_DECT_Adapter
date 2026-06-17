@@ -28,16 +28,3 @@ sudo ip route flush dev $IFACENAME
 sudo ip address add "$LOCAL_IP"/24 dev $IFACENAME
 sudo ip route add "$REMOTE_IP" dev $IFACENAME
 
-#
-#
-# sudo ip address add 111.222.111.2/24 brd + dev $IFACENAME1
-# sudo ip address add 111.222.111.3/24 brd + dev $IFACENAME2
-# # sudo ip route add 111.222.111.3 dev $IFACENAME # ping 111.222.111.3 and itll be routed thru CAFE00000001
-# # sudo ip route add 111.222.111.3 dev $IFACENAME
-# ip a show dev $IFACENAME
-#
-# # sudo ip address flush dev $IFACENAME 
-# # sudo ip route flush dev $IFACENAME 
-# # sudo ip address add 111.222.111.3/24 brd + dev $IFACENAME
-# # sudo ip route add 111.222.111.1 dev $IFACENAME
-# # ip a show dev $IFACENAME
