@@ -95,6 +95,13 @@ int dect_phy_init(void)
     LOG_ERR("Fatal error during PHY configure");
     return -EIO;
   }
+    
+  nrf_modem_dect_phy_capability_get();
+  k_sem_take(&operation_sem, K_FOREVER);
+  if (phy_fatal_error) {
+    LOG_ERR("Fatal error during PHY capa get");
+    return -EIO;
+  }
 
   err = nrf_modem_dect_phy_activate(NRF_MODEM_DECT_PHY_RADIO_MODE_LOW_LATENCY);
   if (err) {

@@ -52,6 +52,7 @@ extern volatile bool phy_fatal_error;
 static pdc_handler_t         app_pdc_handler         = NULL;
 static pcc_handler_t         app_pcc_handler         = NULL;
 static pdc_crc_err_handler_t app_pdc_crc_err_handler = NULL;
+static capability_get_handler_t app_capabilities_get_handler = NULL;
 
 /* ------------------------------------------------------------------ */
 /*  Setter implementations                                             */
@@ -59,17 +60,22 @@ static pdc_crc_err_handler_t app_pdc_crc_err_handler = NULL;
 
 void dect_events_register_pdc_handler(pdc_handler_t handler)
 {
-    app_pdc_handler = handler;
+  app_pdc_handler = handler;
 }
 
 void dect_events_register_pcc_handler(pcc_handler_t handler)
 {
-    app_pcc_handler = handler;
+  app_pcc_handler = handler;
 }
 
 void dect_events_register_pdc_crc_err_handler(pdc_crc_err_handler_t handler)
 {
-    app_pdc_crc_err_handler = handler;
+  app_pdc_crc_err_handler = handler;
+}
+
+void dect_events_register_capability_get_handler(capability_get_handler_t handler)
+{
+  app_capabilities_get_handler = handler;
 }
 
 /* ------------------------------------------------------------------ */
@@ -78,91 +84,91 @@ void dect_events_register_pdc_crc_err_handler(pdc_crc_err_handler_t handler)
 
 static void on_init(const struct nrf_modem_dect_phy_init_event *evt)
 {
-    if (evt->err) {
-        LOG_ERR("Init failed, err %d", evt->err);
-        phy_fatal_error = true;
-        return;
-    }
+  if (evt->err) {
+    LOG_ERR("Init failed, err %d", evt->err);
+    phy_fatal_error = true;
+    return;
+  }
 
-    LOG_DBG("on_init: giving operation_sem (err=%d)", evt->err);
-    k_sem_give(&operation_sem);
+  LOG_DBG("on_init: giving operation_sem (err=%d)", evt->err);
+  k_sem_give(&operation_sem);
 }
 
 static void on_deinit(const struct nrf_modem_dect_phy_deinit_event *evt)
 {
-    if (evt->err) {
-        LOG_ERR("Deinit failed, err %d", evt->err);
-        return;
-    }
+  if (evt->err) {
+    LOG_ERR("Deinit failed, err %d", evt->err);
+    return;
+  }
 
-    LOG_DBG("on_deinit: giving deinit_sem (err=%d)", evt->err);
-    k_sem_give(&deinit_sem);
+  LOG_DBG("on_deinit: giving deinit_sem (err=%d)", evt->err);
+  k_sem_give(&deinit_sem);
 }
 
 static void on_activate(const struct nrf_modem_dect_phy_activate_event *evt)
 {
-    if (evt->err) {
-        LOG_ERR("Activate failed, err %d", evt->err);
-        phy_fatal_error = true;
-        return;
-    }
+  if (evt->err) {
+    LOG_ERR("Activate failed, err %d", evt->err);
+    phy_fatal_error = true;
+    return;
+  }
 
-    LOG_DBG("on_activate: giving operation_sem (err=%d)", evt->err);
-    k_sem_give(&operation_sem);
+  LOG_DBG("on_activate: giving operation_sem (err=%d)", evt->err);
+  k_sem_give(&operation_sem);
 }
 
 static void on_deactivate(const struct nrf_modem_dect_phy_deactivate_event *evt)
 {
-    if (evt->err) {
-        LOG_ERR("Deactivate failed, err %d", evt->err);
-        return;
-    }
+  if (evt->err) {
+    LOG_ERR("Deactivate failed, err %d", evt->err);
+    return;
+  }
 
-    LOG_DBG("on_deactivate: giving deinit_sem (err=%d)", evt->err);
-    k_sem_give(&deinit_sem);
+  LOG_DBG("on_deactivate: giving deinit_sem (err=%d)", evt->err);
+  k_sem_give(&deinit_sem);
 }
 
 static void on_configure(const struct nrf_modem_dect_phy_configure_event *evt)
 {
-    if (evt->err) {
-        LOG_ERR("Configure failed, err %d", evt->err);
-        return;
-    }
+  if (evt->err) {
+    LOG_ERR("Configure failed, err %d", evt->err);
+    return;
+  }
 
-    LOG_DBG("on_configure: giving operation_sem (err=%d)", evt->err);
-    k_sem_give(&operation_sem);
+  LOG_DBG("on_configure: giving operation_sem (err=%d)", evt->err);
+  k_sem_give(&operation_sem);
 }
 
 static void on_radio_config(const struct nrf_modem_dect_phy_radio_config_event *evt)
 {
-    if (evt->err) {
-        LOG_ERR("Radio config failed, err %d", evt->err);
-        return;
-    }
+  if (evt->err) {
+    LOG_ERR("Radio config failed, err %d", evt->err);
+    return;
+  }
 
-    LOG_DBG("on_radio_config: giving operation_sem (err=%d)", evt->err);
-    k_sem_give(&operation_sem);
+  LOG_DBG("on_radio_config: giving operation_sem (err=%d)", evt->err);
+  k_sem_give(&operation_sem);
 }
 
 static void on_op_complete(const struct nrf_modem_dect_phy_op_complete_event *evt)
 {
-    LOG_DBG("on_op_complete: time=%" PRIu64 " err=%d -> giving operation_sem + tx_sem", modem_time, evt->err);
+  LOG_DBG("on_op_complete: time=%" PRIu64 " err=%d -> giving operation_sem + tx_sem", modem_time, evt->err);
 
-    k_sem_give(&operation_sem);
-    k_sem_give(&tdma_sem);
+  k_sem_give(&operation_sem);
+  k_sem_give(&tdma_sem);
 }
 
 static void on_cancel(const struct nrf_modem_dect_phy_cancel_event *evt)
 {
-    LOG_DBG("on_cancel: err=%d -> giving operation_sem", evt->err);
+  LOG_DBG("on_cancel: err=%d -> giving operation_sem", evt->err);
 
-    k_sem_give(&operation_sem);
+  k_sem_give(&operation_sem);
 }
 static void on_time_get(const struct nrf_modem_dect_phy_time_get_event *evt)
 {
-    LOG_DBG("on_time_get: time=%" PRIu64 " err=%d -> giving time_sem", modem_time, evt->err);
+  LOG_DBG("on_time_get: time=%" PRIu64 " err=%d -> giving time_sem", modem_time, evt->err);
 
-    k_sem_give(&time_sem);
+  k_sem_give(&time_sem);
 }
 
 /* ------------------------------------------------------------------ */
@@ -175,29 +181,29 @@ static void on_time_get(const struct nrf_modem_dect_phy_time_get_event *evt)
  */
 static void on_pcc(const struct nrf_modem_dect_phy_pcc_event *evt)
 {
-    LOG_DBG("PCC from device ID %d",
-            evt->hdr.hdr_type_1.transmitter_id_hi << 8 |
-            evt->hdr.hdr_type_1.transmitter_id_lo);
-    LOG_DBG("  Short Network ID  : %u", evt->hdr.hdr_type_1.short_network_id);
-    LOG_DBG("  Header Format     : %u", evt->hdr.hdr_type_1.header_format);
-    LOG_DBG("  Packet Length     : %u %s",
-            evt->hdr.hdr_type_1.packet_length,
-            evt->hdr.hdr_type_1.packet_length_type ? "slots" : "subslots");
-    LOG_DBG("  DF MCS            : %u", evt->hdr.hdr_type_1.df_mcs);
-    LOG_DBG("  Transmit Power    : %u", evt->hdr.hdr_type_1.transmit_power);
+  LOG_DBG("PCC from device ID %d",
+          evt->hdr.hdr_type_1.transmitter_id_hi << 8 |
+          evt->hdr.hdr_type_1.transmitter_id_lo);
+  LOG_DBG("  Short Network ID  : %u", evt->hdr.hdr_type_1.short_network_id);
+  LOG_DBG("  Header Format     : %u", evt->hdr.hdr_type_1.header_format);
+  LOG_DBG("  Packet Length     : %u %s",
+          evt->hdr.hdr_type_1.packet_length,
+          evt->hdr.hdr_type_1.packet_length_type ? "slots" : "subslots");
+  LOG_DBG("  DF MCS            : %u", evt->hdr.hdr_type_1.df_mcs);
+  LOG_DBG("  Transmit Power    : %u", evt->hdr.hdr_type_1.transmit_power);
 
-    /* Always capture — tasks read this without registering a PCC handler. */
-    last_rx_hdr = evt->hdr.hdr_type_1;
+  /* Always capture — tasks read this without registering a PCC handler. */
+  last_rx_hdr = evt->hdr.hdr_type_1;
 
-    if (app_pcc_handler) {
-        app_pcc_handler(evt);
-    }
+  if (app_pcc_handler) {
+    app_pcc_handler(evt);
+  }
 }
 
 static void on_pcc_crc_err(const struct nrf_modem_dect_phy_pcc_crc_failure_event *evt)
 {
-    LOG_DBG("pcc_crc_err cb time %" PRIu64, modem_time);
-    /* No application hook for PCC CRC errors — add one here if needed. */
+  LOG_DBG("pcc_crc_err cb time %" PRIu64, modem_time);
+  /* No application hook for PCC CRC errors — add one here if needed. */
 }
 
 /**
@@ -207,21 +213,21 @@ static void on_pcc_crc_err(const struct nrf_modem_dect_phy_pcc_crc_failure_event
  */
 static void on_pdc(const struct nrf_modem_dect_phy_pdc_event *evt)
 {
-    LOG_DBG("PDC data len: %d", evt->len);
-    LOG_HEXDUMP_DBG(evt->data, evt->len, "PDC Payload");
+  LOG_DBG("PDC data len: %d", evt->len);
+  LOG_HEXDUMP_DBG(evt->data, evt->len, "PDC Payload");
 
-    if (app_pdc_handler) {
-        app_pdc_handler(evt);
-    }
+  if (app_pdc_handler) {
+    app_pdc_handler(evt);
+  }
 }
 
 static void on_pdc_crc_err(const struct nrf_modem_dect_phy_pdc_crc_failure_event *evt)
 {
-    LOG_DBG("pdc_crc_err cb time %" PRIu64, modem_time);
+  LOG_DBG("pdc_crc_err cb time %" PRIu64, modem_time);
 
-    if (app_pdc_crc_err_handler) {
-        app_pdc_crc_err_handler(modem_time);
-    }
+  if (app_pdc_crc_err_handler) {
+    app_pdc_crc_err_handler(modem_time);
+  }
 }
 
 /* ------------------------------------------------------------------ */
@@ -230,42 +236,47 @@ static void on_pdc_crc_err(const struct nrf_modem_dect_phy_pdc_crc_failure_event
 
 static void on_rssi(const struct nrf_modem_dect_phy_rssi_event *evt)
 {
-    LOG_DBG("rssi cb time %" PRIu64 " carrier %d", modem_time, evt->carrier);
+  LOG_DBG("rssi cb time %" PRIu64 " carrier %d", modem_time, evt->carrier);
 }
 
 static void on_capability_get(const struct nrf_modem_dect_phy_capability_get_event *evt)
 {
-    LOG_DBG("capability_get cb time %" PRIu64 " status %d", modem_time, evt->err);
+  if (app_capabilities_get_handler != NULL)
+  {
+    app_capabilities_get_handler(evt);
+  }
+  LOG_DBG("capability_get cb time %" PRIu64 " status %d", modem_time, evt->err);
 }
 
 static void on_bands_get(const struct nrf_modem_dect_phy_band_get_event *evt)
 {
-    LOG_DBG("bands_get cb status %d", evt->err);
+  LOG_DBG("bands_get cb status %d", evt->err);
 }
 
 static void on_latency_info_get(const struct nrf_modem_dect_phy_latency_info_event *evt)
 {
-    if (evt->err) {
-        LOG_ERR("latency_info_get cb status %d", evt->err);
-        return;
-    }
-    latency_info = evt->latency_info;
+  if (evt->err) 
+  {
+    LOG_ERR("latency_info_get cb status %d", evt->err);
+    return;
+  }
+  latency_info = evt->latency_info;
 }
 
 static void on_link_config(const struct nrf_modem_dect_phy_link_config_event *evt)
 {
-    LOG_DBG("link_config cb time %" PRIu64 " status %d", modem_time, evt->err);
+  LOG_DBG("link_config cb time %" PRIu64 " status %d", modem_time, evt->err);
 }
 
 static void on_stf_cover_seq_control(const struct nrf_modem_dect_phy_stf_control_event *evt)
 {
-    LOG_WRN("Unexpectedly in %s", __func__);
+  LOG_WRN("Unexpectedly in %s", __func__);
 }
 
 static void on_test_rf_tx_cw_ctrl(
-    const struct nrf_modem_dect_phy_test_rf_tx_cw_control_event *evt)
+  const struct nrf_modem_dect_phy_test_rf_tx_cw_control_event *evt)
 {
-    LOG_WRN("Unexpectedly in %s", __func__);
+  LOG_WRN("Unexpectedly in %s", __func__);
 }
 
 /* ------------------------------------------------------------------ */
@@ -274,72 +285,72 @@ static void on_test_rf_tx_cw_ctrl(
 
 void dect_phy_event_handler(const struct nrf_modem_dect_phy_event *evt)
 {
-    /* Update shared timestamp first — all callbacks may read it. */
-    modem_time = evt->time;
+  /* Update shared timestamp first — all callbacks may read it. */
+  modem_time = evt->time;
 
-    switch (evt->id) {
+  switch (evt->id) {
     case NRF_MODEM_DECT_PHY_EVT_INIT:
-        on_init(&evt->init);
-        break;
+      on_init(&evt->init);
+      break;
     case NRF_MODEM_DECT_PHY_EVT_DEINIT:
-        on_deinit(&evt->deinit);
-        break;
+      on_deinit(&evt->deinit);
+      break;
     case NRF_MODEM_DECT_PHY_EVT_ACTIVATE:
-        on_activate(&evt->activate);
-        break;
+      on_activate(&evt->activate);
+      break;
     case NRF_MODEM_DECT_PHY_EVT_DEACTIVATE:
-        on_deactivate(&evt->deactivate);
-        break;
+      on_deactivate(&evt->deactivate);
+      break;
     case NRF_MODEM_DECT_PHY_EVT_CONFIGURE:
-        on_configure(&evt->configure);
-        break;
+      on_configure(&evt->configure);
+      break;
     case NRF_MODEM_DECT_PHY_EVT_RADIO_CONFIG:
-        on_radio_config(&evt->radio_config);
-        break;
+      on_radio_config(&evt->radio_config);
+      break;
     case NRF_MODEM_DECT_PHY_EVT_COMPLETED:
-        on_op_complete(&evt->op_complete);
-        break;
+      on_op_complete(&evt->op_complete);
+      break;
     case NRF_MODEM_DECT_PHY_EVT_CANCELED:
-        on_cancel(&evt->cancel);
-        break;
+      on_cancel(&evt->cancel);
+      break;
     case NRF_MODEM_DECT_PHY_EVT_RSSI:
-        on_rssi(&evt->rssi);
-        break;
+      on_rssi(&evt->rssi);
+      break;
     case NRF_MODEM_DECT_PHY_EVT_PCC:
-        on_pcc(&evt->pcc);
-        break;
+      on_pcc(&evt->pcc);
+      break;
     case NRF_MODEM_DECT_PHY_EVT_PCC_ERROR:
-        on_pcc_crc_err(&evt->pcc_crc_err);
-        break;
+      on_pcc_crc_err(&evt->pcc_crc_err);
+      break;
     case NRF_MODEM_DECT_PHY_EVT_PDC:
-        on_pdc(&evt->pdc);
-        break;
+      on_pdc(&evt->pdc);
+      break;
     case NRF_MODEM_DECT_PHY_EVT_PDC_ERROR:
-        on_pdc_crc_err(&evt->pdc_crc_err);
-        break;
+      on_pdc_crc_err(&evt->pdc_crc_err);
+      break;
     case NRF_MODEM_DECT_PHY_EVT_TIME:
-        on_time_get(&evt->time_get);
-        break;
+      on_time_get(&evt->time_get);
+      break;
     case NRF_MODEM_DECT_PHY_EVT_CAPABILITY:
-        on_capability_get(&evt->capability_get);
-        break;
+      on_capability_get(&evt->capability_get);
+      break;
     case NRF_MODEM_DECT_PHY_EVT_BANDS:
-        on_bands_get(&evt->band_get);
-        break;
+      on_bands_get(&evt->band_get);
+      break;
     case NRF_MODEM_DECT_PHY_EVT_LATENCY:
-        on_latency_info_get(&evt->latency_get);
-        break;
+      on_latency_info_get(&evt->latency_get);
+      break;
     case NRF_MODEM_DECT_PHY_EVT_LINK_CONFIG:
-        on_link_config(&evt->link_config);
-        break;
+      on_link_config(&evt->link_config);
+      break;
     case NRF_MODEM_DECT_PHY_EVT_STF_CONFIG:
-        on_stf_cover_seq_control(&evt->stf_cover_seq_control);
-        break;
+      on_stf_cover_seq_control(&evt->stf_cover_seq_control);
+      break;
     case NRF_MODEM_DECT_PHY_EVT_TEST_RF_TX_CW_CONTROL_CONFIG:
-        on_test_rf_tx_cw_ctrl(&evt->test_rf_tx_cw_control);
-        break;
+      on_test_rf_tx_cw_ctrl(&evt->test_rf_tx_cw_control);
+      break;
     default:
-        LOG_WRN("Unhandled event id: %d", evt->id);
-        break;
-    }
+      LOG_WRN("Unhandled event id: %d", evt->id);
+      break;
+  }
 }

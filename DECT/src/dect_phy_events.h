@@ -50,6 +50,13 @@ typedef void (*pcc_handler_t)(const struct nrf_modem_dect_phy_pcc_event *evt);
  */
 typedef void (*pdc_crc_err_handler_t)(uint64_t time);
 
+/**
+ * @brief Called when a capabilities get response comes in
+ *
+ * @param evt
+ */
+typedef void (*capability_get_handler_t)(const struct nrf_modem_dect_phy_capability_get_event *evt);
+
 /* ------------------------------------------------------------------ */
 /*  Handler registration (setters)                                     */
 /* ------------------------------------------------------------------ */
@@ -79,6 +86,13 @@ void dect_events_register_pcc_handler(pcc_handler_t handler);
  * @param handler  Function to call on PDC CRC error. May be NULL.
  */
 void dect_events_register_pdc_crc_err_handler(pdc_crc_err_handler_t handler);
+
+/**
+ * @brief Register the application for capability get handler
+ *
+ * @param handler function to call on capability get
+ */
+void dect_events_register_capability_get_handler(capability_get_handler_t handler);
 
 /* ------------------------------------------------------------------ */
 /*  Zephyr-facing event handler                                        */

@@ -50,25 +50,27 @@ void pressed(const struct device *dev, struct gpio_callback *cb, uint32_t pins)
 	}
 	else if (pins == (1 << button4.spec.pin))
 	{
-		nrf_modem_dect_phy_time_get();
-    static struct nrf_modem_dect_phy_hdr_type_1 tx_hdr = {
-      .packet_length      = 1,
-      .packet_length_type = 0x01,
-      .header_format      = 0x0,
-      .short_network_id   = (CONFIG_NETWORK_ID & 0xff),
-      .transmitter_id_hi  = (0 >> 8) & 0xff,
-      .transmitter_id_lo  = (0 & 0xff),
-      .df_mcs             = FRAME_TX_MCS,
-      .reserved           = 0,
-      .transmit_power     = CONFIG_TX_POWER,
-    };
-  
-    uint64_t start_time = 0;
-    LOG_INF("SENDING TEST PAYLOAD WITH %d USECOND DELAY", start_time);
-    // k_sem_take(&tdma_sem, K_FOREVER);
-    dect_phy_tx(TX_HANDLE, &tx_hdr, 32, teststr, start_time);
-    k_sem_take(&tdma_sem, K_FOREVER);
-    k_sem_reset(&tdma_sem);
+		// nrf_modem_dect_phy_time_get();
+		//   static struct nrf_modem_dect_phy_hdr_type_1 tx_hdr = {
+		//     .packet_length      = 1,
+		//     .packet_length_type = 0x01,
+		//     .header_format      = 0x0,
+		//     .short_network_id   = (CONFIG_NETWORK_ID & 0xff),
+		//     .transmitter_id_hi  = (0 >> 8) & 0xff,
+		//     .transmitter_id_lo  = (0 & 0xff),
+		//     .df_mcs             = FRAME_TX_MCS,
+		//     .reserved           = 0,
+		//     .transmit_power     = CONFIG_TX_POWER,
+		//   };
+		//
+		//   uint64_t start_time = 0;
+		//   LOG_INF("SENDING TEST PAYLOAD WITH %d USECOND DELAY", start_time);
+		//   // k_sem_take(&tdma_sem, K_FOREVER);
+		//   dect_phy_tx(TX_HANDLE, &tx_hdr, 32, teststr, start_time);
+		//   k_sem_take(&tdma_sem, K_FOREVER);
+		//   k_sem_reset(&tdma_sem);
+    //
+    // nrf_modem_dect_phy_capability_get();
 	}
 	LOG_INF("BUTTON PRESSED %s %d", dev->name, pins);
 }
@@ -89,8 +91,8 @@ int main(void)
 	//dect_events_register_pdc_handler(on_pdc);
 	LOG_DBG("PDC handler registered");
 
-	dect_phy_init();
-	LOG_DBG("DECT PHY initialized");
+	// dect_phy_init();
+	// LOG_DBG("DECT PHY initialized");
 
 	serial_init();
 	LOG_DBG("Serial initialized");
@@ -112,6 +114,11 @@ int main(void)
 		device_id = 0;
 	}
 	LOG_DBG("Device ID: 0x%04x", device_id);
+
+	while(mode == UNDEFINED_ROLE){
+		LOG_INF("BUTTON1 FOR MASTER, BUTTON2 FOR SLAVE, BUTTON3 FOR SINK");
+		k_sleep(K_MSEC(1000));
+	}
 
   testloop(mode);
 
