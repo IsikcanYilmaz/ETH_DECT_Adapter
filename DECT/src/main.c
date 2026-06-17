@@ -45,10 +45,8 @@ void pressed(const struct device *dev, struct gpio_callback *cb, uint32_t pins)
 	}
 	else if (pins == (1 << button3.spec.pin))
 	{
-		// mode = SINK;
-		// LOG_INF("MODE SINK");
-    mode = TEST;
-    // testloop();
+		mode = SINK;
+		LOG_INF("MODE SINK");
 	}
 	else if (pins == (1 << button4.spec.pin))
 	{
@@ -122,8 +120,6 @@ int main(void)
 	// dect_events_register_pcc_handler(tdma_on_pcc);
 	// dect_events_register_pdc_handler(serial_on_pdc);
 	// dect_events_register_pdc_handler(sink_serial_on_pdc);
-  
-  
 
 	LOG_DBG("Dect serial initialized");
 	init_tdma();
