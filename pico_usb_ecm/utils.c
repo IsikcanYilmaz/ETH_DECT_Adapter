@@ -7,13 +7,21 @@
 
 void Utils_SwInit(void)
 {
-  gpio_init(SWITCH_GPIO_PIN);
-  gpio_set_input_enabled(SWITCH_GPIO_PIN, true);
+  gpio_init(MAC_ADDR_SWITCH_GPIO_PIN);
+  gpio_set_input_enabled(MAC_ADDR_SWITCH_GPIO_PIN, true);
+
+  gpio_init(LOG_ENABLE_SWITCH_GPIO_PIN);
+  gpio_set_input_enabled(LOG_ENABLE_SWITCH_GPIO_PIN, true);
 }
 
-uint8_t Utils_GetSw(void)
+uint8_t Utils_GetMacSw(void)
 {
-  return gpio_get(SWITCH_GPIO_PIN);
+  return gpio_get(MAC_ADDR_SWITCH_GPIO_PIN);
+}
+
+uint8_t Utils_GetLogEnSw(void)
+{
+  return gpio_get(LOG_ENABLE_SWITCH_GPIO_PIN);
 }
 
 int Utils_LedInit(void) 

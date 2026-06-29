@@ -8,7 +8,7 @@
 // CDC interface index for debug logs (only one CDC, so 0)
 #define DEBUG_CDC_ITF   0
 
-static volatile bool s_enabled = true;
+static volatile bool s_enabled = false;
 
 void debug_log_init(void) {
     s_enabled = true;
@@ -63,7 +63,6 @@ void debug_log_printf(const char *fmt, ...) {
 }
 
 #else // DEBUG_LOG_ENABLED == 0
-
 void debug_log_init(void) {}
 void debug_log_set_enabled(bool e) { (void)e; }
 bool debug_log_is_enabled(void) { return false; }

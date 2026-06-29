@@ -142,16 +142,21 @@ void pico_to_usb(uint8_t *buf, uint16_t len)
 int main(void) {
   Utils_LedInit();
   stdio_init_all();
-  debug_log_init();
   lwip_init();
   EthUart_Init();
   EthUart_SetReceiveFrameCallback(pico_to_usb);
-
-  // If gpio 18 (SWITCH_GPIO_PIN) is high, we increment the last number ofg the mac addr
   Utils_SwInit();
-  uint8_t sw = Utils_GetSw();
-  INFO("SWITCH %d", sw);
-  if (sw)
+
+  uint8_t logSw = Utils_GetLogEnSw();
+  if (logSw)
+  {
+    debug_log_init();
+  }
+
+  // If gpio 28 (MAC_ADDR_SWITCH_GPIO_PIN) is high, we increment the last number ofg the mac addr
+  uint8_t macSw = Utils_GetMacSw();
+  INFO("SWITCH %d", macSw);
+  if (macSw)
   {
     tud_network_mac_address[5] = 0x02;   
   }
@@ -159,8 +164,7 @@ int main(void) {
   tusb_init();
   tud_network_recv_renew(); 
 
-  netif_add(&netif_data, &ipaddr, &netmask, &gateway,
-            NULL, netif_init_cb, ethernet_input);
+  netif_add(&netif_data, &ipaddr, &netmask, &gateway, NULL, netif_init_cb, ethernet_input);
   netif_data.hwaddr_len = 6;
   memcpy(netif_data.hwaddr, tud_network_mac_address, 6);
   netif_data.hwaddr[5] ^= 0x01;

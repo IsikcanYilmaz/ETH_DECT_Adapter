@@ -8,17 +8,17 @@
 // ---- COMPILE-TIME SWITCH ----
 // Set to 0 to completely remove debug logging from the binary
 // (no CDC traffic, no printf, zero overhead).
-#define DBG_LOG_ENABLED 0
+#define DBG_LOG_ENABLED 1
 #ifndef DBG_LOG_ENABLED
 #define DBG_LOG_ENABLED 1
 #endif
 
-#define DBG1_LOG_ENABLED 0
+#define DBG1_LOG_ENABLED 1
 #ifndef DBG1_LOG_ENABLED
 #define DBG1_LOG_ENABLED 1
 #endif
 
-#define INFO_LOG_ENABLED 0
+#define INFO_LOG_ENABLED 1
 #ifndef INFO_LOG_ENABLED
 #define INFO_LOG_ENABLED 1
 #endif

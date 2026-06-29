@@ -43,12 +43,15 @@ static void EthUart_FrameReceiveCheckTimeout(void)
 {
   if (frameReceiveStateTimeout && time_reached(frameReceiveStateTimeout))
   {
+    WARN("%lu PACKET RECEIVE TIMED OUT!!!", frameReceiveStateTimeout);
+    WARN("EXPECTED %d BYTES. RECEIVED %d", frameLength, frameByteIndex);
+    Utils_Hexdump(frameReceiveBuffer,frameLength);
+    memset(frameReceiveBuffer, 0x00, FRAME_RX_BUFFER_SIZE_BYTES);
     ethUartRxHead = ethUartRxTail;
     frameLength = 0;
     frameByteIndex = 0;
     frameReceiveState = MAGIC0;
     frameReceiveStateTimeout = 0;
-    WARN("PACKET RECEIVE TIMED OUT!!!");
   }
 }
 
@@ -58,7 +61,7 @@ static void EthUart_FrameReceiveCheckTimeout(void)
 // TODO implement timeout scheme that takes us back to the first state
 static void EthUart_ReceiveFrame(void)
 {
-  // DBG("FRAME %d - %d vvvvvvvv", ethUartRxHead, ethUartRxTail);
+  DBG("(%lu) FRAME %d - %d vvvvvvvv", time_us_32(), ethUartRxHead, ethUartRxTail);
 
   while(ethUartRxHead != ethUartRxTail)
   {
@@ -145,8 +148,12 @@ static void EthUart_ReceiveFrame(void)
         if (frameByteIndex == frameLength)
         {
           frameReceiveState++;
+          // FALL THRU
         }
-        break;
+        else
+        {
+          break;
+        }
       }
       case FRAME_RECEIVED:
       {
@@ -174,7 +181,7 @@ static void EthUart_ReceiveFrame(void)
     ethUartRxHead = (ethUartRxHead + 1) % ETH_UART_RX_BUFFER_SIZE_BYTES;
   }
   // debug_log_printf("\n");
-  // DBG("FRAME PROCESS END %d %d STATE %d ^^^^^^^^", ethUartRxHead, ethUartRxTail, frameReceiveState);
+  DBG("FRAME PROCESS END %d %d STATE %d ^^^^^^^^", ethUartRxHead, ethUartRxTail, frameReceiveState);
 }
 
 static void EthUart_DmaIrqHandler(void)

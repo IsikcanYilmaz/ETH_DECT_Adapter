@@ -35,6 +35,7 @@ target_link_libraries(pico_ecm PRIVATE
     tinyusb_device
     tinyusb_board
     hardware_dma
+    pico_multicore
     # tinyusb_additional_class_net    # older SDKs: use pico_lwip + pico_lwip_iperf
     pico_lwip
     pico_lwip_nosys

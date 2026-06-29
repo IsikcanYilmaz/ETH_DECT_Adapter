@@ -92,7 +92,7 @@ uint16_t const* tud_descriptor_string_cb(uint8_t index, uint16_t langid) {
   uint8_t chr_count;
 
   // If GPIO 18 is high, increment the last byte of the MAC addr
-  uint8_t sw = Utils_GetSw();
+  uint8_t sw = Utils_GetMacSw();
   if (sw)
   {
     string_desc_arr[5] = mac_address_string_2;
