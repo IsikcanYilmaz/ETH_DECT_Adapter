@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+SHIELD="seeed_w5500"
+if [ "$(nrfutil device device-info | grep 61)" ]; then
+  echo "nRF9161 DK"
+  west build -p -b nrf9161dk/nrf9161/ns -- -DDTC_OVERLAY_FILE=dongle.overlay
+else
+  echo "nRF9151 DK"
+  west build -p -b nrf9151dk/nrf9151/ns -- -DDTC_OVERLAY_FILE=dongle.overlay
+fi
+

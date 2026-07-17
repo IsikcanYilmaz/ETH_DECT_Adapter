@@ -1,0 +1,50 @@
+/*
+Enable uart1
+*/
+
+&uart1 {
+	status="okay";
+	/* current-speed= <921600>; */
+	current-speed=<1000000>;
+};
+
+/* &eth_w5500 { */
+/*   local-mac-address = [A8 61 0A AE 66 46]; */
+/*   status = "okay"; */
+/* }; */
+
+// LEAN W5500 //
+
+&arduino_spi {   /* SPI on nRF9151 DK Arduino header */
+  status = "okay";
+  cs-gpios = <&arduino_header 16 GPIO_ACTIVE_LOW>; /* D10 */
+
+  w5500_dev: spi-dev@0 {
+    compatible = "vnd,spi-device";   /* generic - no driver binds */
+    reg = <0>;
+    spi-max-frequency = <8000000>;   /* W5500 tolerates up to ~33-80 MHz */
+    label = "W5500_RAW";
+  };
+};
+
+/ {
+  w5500_gpios {
+    compatible = "gpio-keys";
+    w5500_rst: w5500_rst {
+      gpios = <&arduino_header 12 GPIO_ACTIVE_LOW>; /* D6 - reset */
+      label = "W5500 RESET";
+    };
+    w5500_int: w5500_int {
+      gpios = <&arduino_header 8 GPIO_ACTIVE_LOW>;  /* D2 - INT */
+      label = "W5500 INT";
+    };
+  };
+};
+
+/ {
+    zephyr,user {
+        master-slave-input-gpios = <&gpio0 21 GPIO_ACTIVE_HIGH>;
+        master-slave-output-gpios = <&gpio0 22 GPIO_ACTIVE_HIGH>;
+    };
+};
+
