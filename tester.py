@@ -12,11 +12,7 @@ Forge a custom IP Packet and send it to our Pico interface
 def main(iface=1, length=0):
     sourceMAC="00:11:22:33:44:55:66"
     destinationMAC="CA:FE:00:00:00:01"
-    ifacename="enxcafe00000001"
-
-    if (iface == 2):
-        ifacename="enxcafe00000002"
-        destinationMAC="CA:FE:00:00:00:02"
+    ifacename="enp1s0f0"
 
     destinationIP="111.222.111.2"
 
