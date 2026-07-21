@@ -18,6 +18,14 @@
 static const struct gpio_dt_spec masterSlaveSwitchInput = GPIO_DT_SPEC_GET(DT_PATH(zephyr_user), master_slave_input_gpios);
 static const struct gpio_dt_spec masterSlaveSwitchOutput = GPIO_DT_SPEC_GET(DT_PATH(zephyr_user), master_slave_output_gpios);
 
+const struct gpio_dt_spec tp23Switch = GPIO_DT_SPEC_GET(DT_PATH(zephyr_user), tp_23_gpios);
+const struct gpio_dt_spec tp24Switch = GPIO_DT_SPEC_GET(DT_PATH(zephyr_user), tp_24_gpios);
+const struct gpio_dt_spec tp25Switch = GPIO_DT_SPEC_GET(DT_PATH(zephyr_user), tp_25_gpios);
+const struct gpio_dt_spec tp26Switch = GPIO_DT_SPEC_GET(DT_PATH(zephyr_user), tp_26_gpios);
+const struct gpio_dt_spec tp27Switch = GPIO_DT_SPEC_GET(DT_PATH(zephyr_user), tp_27_gpios);
+const struct gpio_dt_spec tp03Switch = GPIO_DT_SPEC_GET(DT_PATH(zephyr_user), tp_03_gpios);
+const struct gpio_dt_spec tp04Switch = GPIO_DT_SPEC_GET(DT_PATH(zephyr_user), tp_04_gpios);
+
 LOG_MODULE_REGISTER(app,LOG_LEVEL_INF);
 
 static void button_handler(uint32_t state, uint32_t has_changed)
@@ -82,6 +90,17 @@ int main(void)
   // On Init P0.21 will be read. If it's HIGH then this board is MASTER
   err = gpio_pin_configure_dt(&masterSlaveSwitchInput, GPIO_INPUT | GPIO_PULL_DOWN);
   err = gpio_pin_configure_dt(&masterSlaveSwitchOutput, GPIO_OUTPUT_ACTIVE);
+
+  // Test points
+  err = gpio_pin_configure_dt(&tp23Switch, GPIO_OUTPUT_INACTIVE);
+  err = gpio_pin_configure_dt(&tp24Switch, GPIO_OUTPUT_INACTIVE);
+  err = gpio_pin_configure_dt(&tp25Switch, GPIO_OUTPUT_INACTIVE);
+  err = gpio_pin_configure_dt(&tp26Switch, GPIO_OUTPUT_INACTIVE);
+  err = gpio_pin_configure_dt(&tp27Switch, GPIO_OUTPUT_INACTIVE);
+  err = gpio_pin_configure_dt(&tp03Switch, GPIO_OUTPUT_INACTIVE);
+  err = gpio_pin_configure_dt(&tp04Switch, GPIO_OUTPUT_INACTIVE);
+
+  // Check the ft/pt switch 
   gpio_pin_set_dt(&masterSlaveSwitchOutput, 1);
   bool iAmMaster = gpio_pin_get_dt(&masterSlaveSwitchInput);
   LOG_WRN("I AM %s", (iAmMaster) ? "MASTER" : "SLAVE");

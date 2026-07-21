@@ -408,15 +408,13 @@ static void w5500_rx_thread(void *p1, void *p2, void *p3)
             LOG_DBG("TX Done");
           }
 
-          if (ir & S0_IR_RECV) {
-            struct LeanWiznet_packet *pkt = w5500_rx(cfg, ctx);
+          if (ir & S0_IR_RECV && rxcb)
+          {
+            struct LeanWiznet_packet *pkt = w5500_rx(cfg, ctx); // Only do the reception if there's a callback attached
             if (pkt)
             {
-              if (rxcb) // If a callback is registered, call it and notify upper layers
-              {
-                k_queue_append(&ethRxQueue, pkt);
-                rxcb();
-              }
+              k_queue_append(&ethRxQueue, pkt);
+              rxcb();
             }
             else
             {

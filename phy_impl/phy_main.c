@@ -7,14 +7,29 @@
 #include <modem/nrf_modem_lib.h>
 #include <zephyr/logging/log.h>
 #include <zephyr/drivers/hwinfo.h>
+#include <zephyr/drivers/gpio.h>
 #include "phy_main.h"
 
-LOG_MODULE_REGISTER(dect_phy, LOG_LEVEL_DBG);
+LOG_MODULE_REGISTER(dect_phy, LOG_LEVEL_ERR);
 
 #define CONFIG_CARRIER (1677) // from overlay-eu.conf
 
 extern struct k_queue ethTxQueue;
 extern struct k_queue ethRxQueue;
+
+extern const struct gpio_dt_spec tp23Switch; // todo put these elsewhere
+extern const struct gpio_dt_spec tp24Switch;
+extern const struct gpio_dt_spec tp25Switch;
+extern const struct gpio_dt_spec tp26Switch;
+extern const struct gpio_dt_spec tp27Switch;
+extern const struct gpio_dt_spec tp03Switch;
+extern const struct gpio_dt_spec tp04Switch;
+
+static const struct gpio_dt_spec *beaconTxSwitch = &tp23Switch;
+static const struct gpio_dt_spec *dlSwitch = &tp24Switch;
+static const struct gpio_dt_spec *ulSwitch = &tp25Switch;
+static const struct gpio_dt_spec *pdcSwitch = &tp03Switch;
+static const struct gpio_dt_spec *slotSwitch = &tp04Switch;
 
 #define US_TO_MODEM_TICKS(us) (((uint64_t)(us)/1000)*NRF_MODEM_DECT_MODEM_TIME_TICK_RATE_KHZ)
 #define MODEM_TICKS_TO_MS(t) (t / NRF_MODEM_DECT_MODEM_TIME_TICK_RATE_KHZ)
@@ -37,6 +52,17 @@ inline bool is_rx_handle(uint32_t h)
   return ((h % 2) != 0);
 }
 
+static void set_all_tps(int set)
+{
+  gpio_pin_set_dt(&tp23Switch, set);
+  gpio_pin_set_dt(&tp24Switch, set);
+  gpio_pin_set_dt(&tp25Switch, set);
+  gpio_pin_set_dt(&tp26Switch, set);
+  gpio_pin_set_dt(&tp27Switch, set);
+  gpio_pin_set_dt(&tp03Switch, set);
+  // gpio_pin_set_dt(&tp04Switch, set);
+}
+
 typedef struct Ping_s
 {
   char text[4]; // text that says TEST
@@ -57,17 +83,12 @@ static uint64_t lastPccTs = 0;
 static uint64_t lastPdcTs = 0;
 static uint64_t lastLoopTs = 0;
 
-uint32_t tx_handle = 0;
-uint32_t rx_handle = 1;
-
-uint32_t beacon_tx_handle = 0;
-uint32_t beacon_rx_handle = 1;
-uint32_t ft_tx_handle = 2;
-uint32_t ft_rx_handle = 3;
-uint32_t pt_tx_handle = 4;
-uint32_t pt_rx_handle = 5;
-
-static bool waitingForRx = false; // TODO may not be necessary
+const uint32_t beacon_tx_handle = 0;
+const uint32_t beacon_rx_handle = 1;
+const uint32_t ft_tx_handle = 2;
+const uint32_t ft_rx_handle = 3;
+const uint32_t pt_tx_handle = 4;
+const uint32_t pt_rx_handle = 5;
 
 static bool iAmMaster;
 
@@ -146,7 +167,6 @@ static void on_capability_get(const struct nrf_modem_dect_phy_capability_get_eve
 
 static void on_op_complete(const struct nrf_modem_dect_phy_op_complete_event *evt)
 {
-  
   if (evt->err)
   {
     LOG_ERR("op_complete %s cb time %"PRIu64" status %x handle %d", !is_rx_handle(evt->handle) ? "TX" : "RX", modem_time, evt->err, evt->handle);
@@ -156,6 +176,22 @@ static void on_op_complete(const struct nrf_modem_dect_phy_op_complete_event *ev
   {
     k_sem_give(&tx_done_sem);
   }
+
+  switch(evt->handle) // TODO test poijnts remove eventually
+  {
+    case beacon_tx_handle:
+      gpio_pin_set_dt(beaconTxSwitch, 0);
+      break;
+    case ft_tx_handle:
+      gpio_pin_set_dt(dlSwitch, 0);
+      break;
+    case ft_rx_handle:
+      gpio_pin_set_dt(ulSwitch, 0);
+      break;
+    default:
+      break;
+  }
+
 	k_sem_give(&operation_sem);
 }
 
@@ -212,6 +248,7 @@ static void on_pdc(const struct nrf_modem_dect_phy_pdc_event *evt)
     // LOG_WRN("Ping response received. ts1: %llu, ts2: %llu, ts3: %llu, data: %s, cnt: %d", responsePing->ts1, responsePing->ts2, modem_time, responsePing->text, responsePing->counter);
     uint64_t diff = modem_time - responsePing->ts1;
     // LOG_WRN("Diff %llu ticks,  %llu ms", diff, diff / NRF_MODEM_DECT_MODEM_TIME_TICK_RATE_KHZ);
+    gpio_pin_set_dt(pdcSwitch, 1);
   }
 
   k_sem_give(&rx_done_sem);
@@ -365,7 +402,6 @@ static int receive(uint32_t handle, uint32_t durationTicks, uint64_t start_time)
 		.filter.receiver_identity = 0,
 	};
 
-  waitingForRx = true;
 	err = nrf_modem_dect_phy_rx(&rx_op_params);
 	if (err != 0) {
 		return err;
@@ -435,14 +471,32 @@ int DectPhy_Init(void)
 	if (err) {
 		LOG_ERR("nrf_modem_dect_phy_capability_get failed, err %d", err);
 	}
-
-  ///////////////////////////////////// clock sync TODO look into if we want this
-  // nrf_modem_dect_clock_sync_event_handler_set(dect_clock_sync_event_handler);
-  // nrf_modem_dect_clock_sync_enable();
 }
+
+static void test_point_thread(void)
+{
+  while(gpio_pin_get_dt(slotSwitch) == GPIO_OUTPUT_INACTIVE){}
+  while(true)
+  {
+    gpio_pin_toggle_dt(slotSwitch);
+    k_sleep(K_USEC(DECT_SLOT_DURATION_US));
+  }
+}
+K_KERNEL_STACK_MEMBER(testPointThreadStack, 256); // JON pound define
+static struct k_thread testPointThreadHandle;
 
 void DectPhy_Main(bool master)
 {	
+  set_all_tps(0);
+
+	//  k_thread_create(&testPointThreadHandle, testPointThreadStack, 
+	// 		256,
+	// 		test_point_thread,
+	// 		NULL, NULL, NULL,
+	// 		K_PRIO_COOP(2),
+	// 		0, K_NO_WAIT);
+	// k_thread_name_set(&testPointThreadHandle, "test_point_thread");
+
   DectPhy_Init();
   int err;
   iAmMaster = master;
@@ -455,13 +509,16 @@ void DectPhy_Main(bool master)
 
   uint16_t cnt = 0;
 
+  gpio_pin_set_dt(slotSwitch, 1);
+
   while(true)
   {
     if (master) // FT
     {
       LOG_DBG("LOOP %d BEGINNING", cnt);
+      set_all_tps(0);
 
-      const uint64_t start_lead = (12ULL * DECT_SLOT_DURATION_TICK);
+      const uint64_t start_lead = (4ULL * DECT_SLOT_DURATION_TICK);
 
       uint64_t base = modem_time + start_lead;
       
@@ -475,8 +532,13 @@ void DectPhy_Main(bool master)
 
       lastLoopTs = base;
 
+      gpio_pin_set_dt(beaconTxSwitch, 1);
       err = transmit(beacon_tx_handle, "BEAC", 4, beacon_tx_start_time); // FAKE BEACON // t = 0
+      
+      gpio_pin_set_dt(dlSwitch, 1);
       err = transmit(ft_tx_handle, &pingPkt, sizeof(Ping_t) , ft_tx_start_time);
+
+      gpio_pin_set_dt(ulSwitch, 1);
       err = receive(ft_rx_handle, 4 * DECT_SLOT_DURATION_TICK, ft_rx_start_time);
 
       for (int i = 0; i < 3; i++) // wait for all 3 operations
@@ -486,8 +548,6 @@ void DectPhy_Main(bool master)
       
       LOG_DBG("LOOP %d COMPLETE. DIFF %llu", cnt, modem_time - base);
       cnt++;
-
-      // k_sleep(K_MSEC(10));
 
       nrf_modem_dect_phy_time_get(); 
       k_sem_take(&time_sem, K_FOREVER);

@@ -45,6 +45,14 @@ Enable uart1
     zephyr,user {
         master-slave-input-gpios = <&gpio0 21 GPIO_ACTIVE_HIGH>;
         master-slave-output-gpios = <&gpio0 22 GPIO_ACTIVE_HIGH>;
+        // 23 24 25 26 free
+        tp-23-gpios = <&gpio0 23 GPIO_ACTIVE_HIGH>;
+        tp-24-gpios = <&gpio0 24 GPIO_ACTIVE_HIGH>;
+        tp-25-gpios = <&gpio0 25 GPIO_ACTIVE_HIGH>;
+        tp-26-gpios = <&gpio0 26 GPIO_ACTIVE_HIGH>;
+        tp-27-gpios = <&gpio0 26 GPIO_ACTIVE_HIGH>;
+        tp-03-gpios = <&arduino_header 9 GPIO_ACTIVE_HIGH>;
+        tp-04-gpios = <&arduino_header 10 GPIO_ACTIVE_HIGH>;
     };
 };
 
