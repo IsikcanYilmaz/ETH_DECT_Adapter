@@ -9,19 +9,41 @@
 #include <zephyr/drivers/hwinfo.h>
 #include "phy_main.h"
 
-LOG_MODULE_REGISTER(dect_phy, LOG_LEVEL_WRN);
+LOG_MODULE_REGISTER(dect_phy, LOG_LEVEL_DBG);
 
 #define CONFIG_CARRIER (1677) // from overlay-eu.conf
 
 extern struct k_queue ethTxQueue;
 extern struct k_queue ethRxQueue;
 
+#define US_TO_MODEM_TICKS(us) (((uint64_t)(us)/1000)*NRF_MODEM_DECT_MODEM_TIME_TICK_RATE_KHZ)
+#define MODEM_TICKS_TO_MS(t) (t / NRF_MODEM_DECT_MODEM_TIME_TICK_RATE_KHZ)
+
+#define DECT_FRAME_DURATION_MS (10)
+#define DECT_FRAME_DURATION_US (10000)
+#define DECT_SLOTS_PER_FRAME (24)
+#define DECT_SLOT_DURATION_US (417) // 416.67
+#define DECT_SLOT_DURATION_TICK ((uint64_t)(2 * DECT_SLOT_DURATION_US * NRF_MODEM_DECT_MODEM_TIME_TICK_RATE_KHZ / 1000))
+#define DECT_GAP_US (100) // ?
+#define DECT_GAP_TICK (DECT_GAP_US * NRF_MODEM_DECT_MODEM_TIME_TICK_RATE_KHZ / 1000)
+
+inline uint64_t us_to_modem_ticks(uint64_t us)
+{
+  return (((uint64_t) us / 1000) * NRF_MODEM_DECT_MODEM_TIME_TICK_RATE_KHZ);
+}
+
+inline bool is_rx_handle(uint32_t h)
+{
+  return ((h % 2) != 0);
+}
+
 typedef struct Ping_s
 {
   char text[4]; // text that says TEST
+  uint16_t counter; 
   uint64_t ts1; // master send ts
   uint64_t ts2; // slave receive ts
-} __attribute__((packed)) Ping_t;
+} __attribute__((packed)) Ping_t; // 20
 
 static size_t len; // test ping
 static char pingBuf[128]; // test ping buffer
@@ -29,15 +51,28 @@ static Ping_t *responsePing = (Ping_t *) pingBuf; // TODO remove all of these ev
 
 static bool exit;
 static uint16_t device_id;
-static uint64_t modem_time;
+static volatile uint64_t modem_time;
+
 static uint64_t lastPccTs = 0;
 static uint64_t lastPdcTs = 0;
+static uint64_t lastLoopTs = 0;
 
 uint32_t tx_handle = 0;
 uint32_t rx_handle = 1;
+
+uint32_t beacon_tx_handle = 0;
+uint32_t beacon_rx_handle = 1;
+uint32_t ft_tx_handle = 2;
+uint32_t ft_rx_handle = 3;
+uint32_t pt_tx_handle = 4;
+uint32_t pt_rx_handle = 5;
+
 static bool waitingForRx = false; // TODO may not be necessary
 
 static bool iAmMaster;
+
+static volatile bool gotBeacon = false;
+static volatile bool gotData = false;
 
 /* Header type 1, due to endianness the order is different than in the specification. */
 struct phy_ctrl_field_common {
@@ -60,10 +95,12 @@ static struct nrf_modem_dect_phy_config_params dect_phy_config_params = {
 	.harq_rx_expiry_time_us = 5000000,
 };
 
-K_SEM_DEFINE(operation_sem, 0, 1);
-K_SEM_DEFINE(rx_sem, 0, 1);
+K_SEM_DEFINE(operation_sem, 0, 3); // 3 operations per frame beacon uplink downlink
+K_SEM_DEFINE(cancel_sem, 0, 1);
+K_SEM_DEFINE(beacon_sem, 0, 1);
+K_SEM_DEFINE(rx_done_sem, 0, 1);
+K_SEM_DEFINE(tx_done_sem, 0, 1);
 K_SEM_DEFINE(time_sem, 0, 1);
-K_SEM_DEFINE(deinit_sem, 0, 1);
 
 /* Callback after init operation. */
 static void on_init(const struct nrf_modem_dect_phy_init_event *evt)
@@ -97,19 +134,27 @@ static void on_activate(const struct nrf_modem_dect_phy_activate_event *evt)
 
 static void on_capability_get(const struct nrf_modem_dect_phy_capability_get_event *evt)
 {
-	LOG_DBG("capability_get cb time %"PRIu64" status %d", modem_time, evt->err);
+  if (evt->err)
+  {
+    LOG_ERR("capability_get cb time %"PRIu64" status %x", modem_time, evt->err);
+  }
+  else 
+  {
+    LOG_WRN("capability_get cb time %"PRIu64" status %x", modem_time, evt->err);
+  }
 }
 
 static void on_op_complete(const struct nrf_modem_dect_phy_op_complete_event *evt)
 {
-	LOG_DBG("op_complete cb time %"PRIu64" status %d handle %d", modem_time, evt->err, evt->handle);
-  if (evt->handle == tx_handle)
+  
+  if (evt->err)
   {
-    LOG_DBG("TX op_complete. handle : %d", tx_handle);
+    LOG_ERR("op_complete %s cb time %"PRIu64" status %x handle %d", !is_rx_handle(evt->handle) ? "TX" : "RX", modem_time, evt->err, evt->handle);
   }
-  else if (evt->handle == rx_handle)
+
+  if (!is_rx_handle(evt->handle))
   {
-    LOG_DBG("RX op_complete. handle : %d", rx_handle);
+    k_sem_give(&tx_done_sem);
   }
 	k_sem_give(&operation_sem);
 }
@@ -125,34 +170,51 @@ static void on_pcc_crc_err(const struct nrf_modem_dect_phy_pcc_crc_failure_event
 	LOG_DBG("pcc_crc_err cb time %"PRIu64"", modem_time);
 }
 
+// TODO more things to check here im sure but currently iut only checksi f the first bytes of the packet reads BEAC
+static bool check_beacon(char *pkt)
+{
+  if (strncmp(pkt, "BEAC", 4) == 0)
+  {
+    return true;
+  }
+  return false;
+}
+
 static void on_pdc(const struct nrf_modem_dect_phy_pdc_event *evt)
 {
 	/* Received RSSI value is in fixed precision format Q14.1 */
-	LOG_DBG("PDC Received data (RSSI: %d.%d): %s", (evt->rssi_2 / 2), (evt->rssi_2 & 0b1) * 5, (char *)evt->data);
+	// LOG_WRN("PDC Received data %d bytes (RSSI: %d.%d): %s", evt->len, (evt->rssi_2 / 2), (evt->rssi_2 & 0b1) * 5, (char *)evt->data);
 
   lastPdcTs = modem_time;
 
-  if (waitingForRx && evt->handle == rx_handle)  // JON TODO this makes it so that we dont wait for more than one rx
-  {
-    nrf_modem_dect_phy_cancel(rx_handle);
-    waitingForRx = false;
-  }
-
   if (!iAmMaster) // If we are the PT we return the ping
   {
-    memcpy(pingBuf, evt->data, sizeof(Ping_t));
-    responsePing->ts2 = modem_time;
+    if (!gotBeacon && check_beacon((char *) evt->data))
+    {
+      gotBeacon = true;
+      k_sem_give(&beacon_sem); // todo not needed
+    }
+    else if (!gotData)
+    {
+      gotData = true;
+      // LOG_INF("GOT DATA %s", evt->data);
+      memcpy(pingBuf, evt->data, sizeof(Ping_t));
+      // responsePing->ts1 = 31;
+      responsePing->ts2 = 31;
+      strncpy(responsePing->text, "QWER", 4);
+    }
   }
 
   if (iAmMaster) // If we are the FT then we print the ping
   {
+    LOG_INF("GOT DATA %s", evt->data);
     memcpy(pingBuf, evt->data, sizeof(Ping_t));
-    LOG_WRN("Ping response received. ts1: %llu, ts2: %llu, ts3: %llu, data: %s", responsePing->ts1, responsePing->ts2, modem_time, responsePing->text);
+    // LOG_WRN("Ping response received. ts1: %llu, ts2: %llu, ts3: %llu, data: %s, cnt: %d", responsePing->ts1, responsePing->ts2, modem_time, responsePing->text, responsePing->counter);
     uint64_t diff = modem_time - responsePing->ts1;
-    LOG_WRN("Diff %llu ticks,  %llu ms", diff, diff / NRF_MODEM_DECT_MODEM_TIME_TICK_RATE_KHZ);
+    // LOG_WRN("Diff %llu ticks,  %llu ms", diff, diff / NRF_MODEM_DECT_MODEM_TIME_TICK_RATE_KHZ);
   }
 
-  k_sem_give(&rx_sem);
+  k_sem_give(&rx_done_sem);
 }
 
 static void on_pdc_crc_err(const struct nrf_modem_dect_phy_pdc_crc_failure_event *evt)
@@ -162,19 +224,24 @@ static void on_pdc_crc_err(const struct nrf_modem_dect_phy_pdc_crc_failure_event
 
 static void on_latency_info_get(const struct nrf_modem_dect_phy_latency_info_event *evt)
 {
-	LOG_DBG("latency_info_get cb status %d", evt->err);
+	LOG_DBG("latency_info_get cb status %x", evt->err);
+}
+
+static void on_cancel(const struct nrf_modem_dect_phy_cancel_event *evt)
+{
+  k_sem_give(&cancel_sem);
 }
 
 static void on_time_get(const struct nrf_modem_dect_phy_time_get_event *evt)
 {
-	LOG_DBG("time_get cb time %"PRIu64" status %d", modem_time, evt->err);
+	LOG_DBG("time_get cb time %"PRIu64" status %x", modem_time, evt->err);
   k_sem_give(&time_sem);
 }
 
 static void dect_phy_event_handler(const struct nrf_modem_dect_phy_event *evt)
 {
   modem_time = evt->time;
-  LOG_DBG("%s modem_time %ull Event %d", __FUNCTION__, evt->time, evt->id);
+  // LOG_DBG("%s modem_time %llu Event %d", __FUNCTION__, evt->time, evt->id);
 	switch (evt->id) {
 	case NRF_MODEM_DECT_PHY_EVT_INIT:
 		on_init(&evt->init);
@@ -198,7 +265,7 @@ static void dect_phy_event_handler(const struct nrf_modem_dect_phy_event *evt)
 		on_op_complete(&evt->op_complete);
 		break;
 	case NRF_MODEM_DECT_PHY_EVT_CANCELED:
-		// on_cancel(&evt->cancel);
+		on_cancel(&evt->cancel);
 		break;
 	case NRF_MODEM_DECT_PHY_EVT_RSSI:
 		// on_rssi(&evt->rssi);
@@ -239,44 +306,13 @@ static void dect_phy_event_handler(const struct nrf_modem_dect_phy_event *evt)
 	}
 }
 
-// CLOCK SYNC CODE
-static void on_clk_sync_enable(const struct nrf_modem_dect_clock_sync_event *evt)
-{
-
-}
-
-static void on_clk_sync_state(const struct nrf_modem_dect_clock_sync_event *evt)
-{
-}
-
-static void dect_clock_sync_event_handler(const struct nrf_modem_dect_clock_sync_event *evt)
-{
-  switch (evt->id)
-  {
-    case NRF_MODEM_DECT_CLOCK_SYNC_EVT_ENABLE:
-      {
-        on_clk_sync_enable(evt);
-        break;
-      }
-    case NRF_MODEM_DECT_CLOCK_SYNC_EVT_STATE:
-      {
-        on_clk_sync_state(evt);
-        break;
-      }
-    default:
-    break;
-  }
-}
-
-// CLOCK SYNC CODE END 
-
 static int transmit(uint32_t handle, void *data, size_t data_len, uint64_t start_time)
 {
   int err;
 
   struct phy_ctrl_field_common header = {
     .header_format = 0x0,
-    .packet_length_type = 0x0,
+    .packet_length_type = 0x1,
     .packet_length = 0x01,
     .short_network_id = (CONFIG_APP_NETWORK_ID & 0xff),
     .transmitter_id_hi = (device_id >> 8),
@@ -293,8 +329,8 @@ static int transmit(uint32_t handle, void *data, size_t data_len, uint64_t start
     .phy_type = 0,
     .lbt_rssi_threshold_max = 0,
     .carrier = CONFIG_CARRIER,
-    .lbt_period = NRF_MODEM_DECT_LBT_PERIOD_MAX, // JON EXPERIMENTAL
-    .phy_header = (union nrf_modem_dect_phy_hdr *)&header,
+    .lbt_period = 0,// NRF_MODEM_DECT_LBT_PERIOD_MAX, // JON EXPERIMENTAL
+    .phy_header = (union nrf_modem_dect_phy_hdr *) &header,
     .data = data,
     .data_size = data_len,
   };
@@ -309,7 +345,7 @@ static int transmit(uint32_t handle, void *data, size_t data_len, uint64_t start
 	return 0;
 }
 
-static int receive(uint32_t handle, uint32_t durationMs, uint64_t start_time)
+static int receive(uint32_t handle, uint32_t durationTicks, uint64_t start_time)
 {
   int err;
 
@@ -317,12 +353,12 @@ static int receive(uint32_t handle, uint32_t durationMs, uint64_t start_time)
 		.start_time = start_time,
 		.handle = handle,
 		.network_id = CONFIG_APP_NETWORK_ID,
-		.mode = NRF_MODEM_DECT_PHY_RX_MODE_CONTINUOUS,
+		.mode = NRF_MODEM_DECT_PHY_RX_MODE_SINGLE_SHOT, //NRF_MODEM_DECT_PHY_RX_MODE_CONTINUOUS,
 		.rssi_interval = NRF_MODEM_DECT_PHY_RSSI_INTERVAL_OFF,
 		.link_id = NRF_MODEM_DECT_PHY_LINK_UNSPECIFIED,
 		.rssi_level = -60,
 		.carrier = CONFIG_CARRIER,
-		.duration = durationMs * NRF_MODEM_DECT_MODEM_TIME_TICK_RATE_KHZ,
+		.duration = durationTicks,
 		.filter.short_network_id = CONFIG_APP_NETWORK_ID & 0xff,
 		.filter.is_short_network_id_used = 1,
 		/* listen for everything (broadcast mode used) */
@@ -405,7 +441,6 @@ int DectPhy_Init(void)
   // nrf_modem_dect_clock_sync_enable();
 }
 
-
 void DectPhy_Main(bool master)
 {	
   DectPhy_Init();
@@ -418,43 +453,69 @@ void DectPhy_Main(bool master)
   nrf_modem_dect_phy_time_get(); 
   k_sem_take(&time_sem, K_FOREVER);
 
-  // if (!master)
-  // {
-  //   err = receive(rx_handle, 50 * MSEC_PER_SEC, 0); // Wait for the first beacon
-  //   k_sem_take(&operation_sem, K_FOREVER);
-  // }
+  uint16_t cnt = 0;
 
   while(true)
   {
     if (master) // FT
     {
-      err = transmit(tx_handle, "BEAC", 4, 0); // FAKE BEACON // t = 0
-      k_sem_take(&operation_sem, K_FOREVER);
+      LOG_DBG("LOOP %d BEGINNING", cnt);
 
-      pingPkt.ts1 = modem_time;
-      pingPkt.ts2 = 0;
+      const uint64_t start_lead = (12ULL * DECT_SLOT_DURATION_TICK);
 
-      err = transmit(tx_handle, &pingPkt, sizeof(Ping_t), 0); // TX 
-      k_sem_take(&operation_sem, K_FOREVER);
-
-      err = receive(rx_handle, 10 * MSEC_PER_SEC, 0); // RX
-      k_sem_take(&operation_sem, K_FOREVER);
+      uint64_t base = modem_time + start_lead;
       
-      LOG_ERR("LOOP COMPLETE");
-      k_sleep(K_SECONDS(10));
+      uint64_t beacon_tx_start_time = base;
+      uint64_t ft_tx_start_time = base + (3 * DECT_SLOT_DURATION_TICK);
+      uint64_t ft_rx_start_time = base + (5 * DECT_SLOT_DURATION_TICK);
+
+      pingPkt.ts1 = base;
+      pingPkt.ts2 = 0;
+      pingPkt.counter = cnt;
+
+      lastLoopTs = base;
+
+      err = transmit(beacon_tx_handle, "BEAC", 4, beacon_tx_start_time); // FAKE BEACON // t = 0
+      err = transmit(ft_tx_handle, &pingPkt, sizeof(Ping_t) , ft_tx_start_time);
+      err = receive(ft_rx_handle, 4 * DECT_SLOT_DURATION_TICK, ft_rx_start_time);
+
+      for (int i = 0; i < 3; i++) // wait for all 3 operations
+      {
+        k_sem_take(&operation_sem, K_FOREVER);
+      }
+      
+      LOG_DBG("LOOP %d COMPLETE. DIFF %llu", cnt, modem_time - base);
+      cnt++;
+
+      // k_sleep(K_MSEC(10));
+
+      nrf_modem_dect_phy_time_get(); 
+      k_sem_take(&time_sem, K_FOREVER);
     }
     else // PT
     {
-      err = receive(rx_handle, 50 * MSEC_PER_SEC, 0); // GET FAKE BEACON
-      k_sem_take(&operation_sem, K_FOREVER);
+      gotBeacon = false;
+      gotData = false;
+      uint64_t base = 0;
 
-      err = receive(rx_handle, 10, 0); // RX 
+      err = receive(beacon_rx_handle, 24 * DECT_SLOT_DURATION_TICK, 0); // GET FAKE BEACON
       k_sem_take(&operation_sem, K_FOREVER);
+      if (!gotBeacon)
+      {
+        // LOG_DBG("BEACON FAILED");
+        continue;
+      }
 
-      err = transmit(tx_handle, responsePing, sizeof(Ping_t), 0); // TX
-      k_sem_take(&operation_sem, K_FOREVER);
+      err = receive(pt_rx_handle, 3 * DECT_SLOT_DURATION_TICK, lastPccTs + (2 * DECT_SLOT_DURATION_TICK));
+      err = transmit(pt_tx_handle, responsePing, sizeof(Ping_t), lastPccTs + (5 * DECT_SLOT_DURATION_TICK) + 1);
 
-      LOG_ERR("LOOP COMPLETE");
+      for (int i = 0; i < 2; i++)
+      {
+        k_sem_take(&operation_sem, K_MSEC(10000));
+      }
+
+      LOG_DBG("LOOP COMPLETE %s %s", (gotBeacon) ? "BEACON" : "", (gotData) ? "DATA" : "");
     }
   }
 }
+
