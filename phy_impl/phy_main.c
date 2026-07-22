@@ -8,6 +8,7 @@
 #include <zephyr/logging/log.h>
 #include <zephyr/drivers/hwinfo.h>
 #include <zephyr/drivers/gpio.h>
+#include "lean_wiznet_driver.h"
 #include "phy_main.h"
 
 LOG_MODULE_REGISTER(dect_phy, LOG_LEVEL_ERR);
@@ -17,19 +18,19 @@ LOG_MODULE_REGISTER(dect_phy, LOG_LEVEL_ERR);
 extern struct k_queue ethTxQueue;
 extern struct k_queue ethRxQueue;
 
-extern const struct gpio_dt_spec tp23Switch; // todo put these elsewhere
-extern const struct gpio_dt_spec tp24Switch;
-extern const struct gpio_dt_spec tp25Switch;
-extern const struct gpio_dt_spec tp26Switch;
-extern const struct gpio_dt_spec tp27Switch;
-extern const struct gpio_dt_spec tp03Switch;
-extern const struct gpio_dt_spec tp04Switch;
-
-static const struct gpio_dt_spec *beaconTxSwitch = &tp23Switch;
-static const struct gpio_dt_spec *dlSwitch = &tp24Switch;
-static const struct gpio_dt_spec *ulSwitch = &tp25Switch;
-static const struct gpio_dt_spec *pdcSwitch = &tp03Switch;
-static const struct gpio_dt_spec *slotSwitch = &tp04Switch;
+// extern const struct gpio_dt_spec tp23Switch; // todo put these elsewhere
+// extern const struct gpio_dt_spec tp24Switch;
+// extern const struct gpio_dt_spec tp25Switch;
+// extern const struct gpio_dt_spec tp26Switch;
+// extern const struct gpio_dt_spec tp27Switch;
+// extern const struct gpio_dt_spec tp03Switch;
+// extern const struct gpio_dt_spec tp04Switch;
+//
+// static const struct gpio_dt_spec *beaconTxSwitch = &tp23Switch;
+// static const struct gpio_dt_spec *dlSwitch = &tp24Switch;
+// static const struct gpio_dt_spec *ulSwitch = &tp25Switch;
+// static const struct gpio_dt_spec *pdcSwitch = &tp03Switch;
+// static const struct gpio_dt_spec *slotSwitch = &tp04Switch;
 
 #define US_TO_MODEM_TICKS(us) (((uint64_t)(us)/1000)*NRF_MODEM_DECT_MODEM_TIME_TICK_RATE_KHZ)
 #define MODEM_TICKS_TO_MS(t) (t / NRF_MODEM_DECT_MODEM_TIME_TICK_RATE_KHZ)
@@ -54,12 +55,12 @@ inline bool is_rx_handle(uint32_t h)
 
 static void set_all_tps(int set)
 {
-  gpio_pin_set_dt(&tp23Switch, set);
-  gpio_pin_set_dt(&tp24Switch, set);
-  gpio_pin_set_dt(&tp25Switch, set);
-  gpio_pin_set_dt(&tp26Switch, set);
-  gpio_pin_set_dt(&tp27Switch, set);
-  gpio_pin_set_dt(&tp03Switch, set);
+  // gpio_pin_set_dt(&tp23Switch, set);
+  // gpio_pin_set_dt(&tp24Switch, set);
+  // gpio_pin_set_dt(&tp25Switch, set);
+  // gpio_pin_set_dt(&tp26Switch, set);
+  // gpio_pin_set_dt(&tp27Switch, set);
+  // gpio_pin_set_dt(&tp03Switch, set);
   // gpio_pin_set_dt(&tp04Switch, set);
 }
 
@@ -180,13 +181,13 @@ static void on_op_complete(const struct nrf_modem_dect_phy_op_complete_event *ev
   switch(evt->handle) // TODO test poijnts remove eventually
   {
     case beacon_tx_handle:
-      gpio_pin_set_dt(beaconTxSwitch, 0);
+      // gpio_pin_set_dt(beaconTxSwitch, 0);
       break;
     case ft_tx_handle:
-      gpio_pin_set_dt(dlSwitch, 0);
+      // gpio_pin_set_dt(dlSwitch, 0);
       break;
     case ft_rx_handle:
-      gpio_pin_set_dt(ulSwitch, 0);
+      // gpio_pin_set_dt(ulSwitch, 0);
       break;
     default:
       break;
@@ -216,6 +217,15 @@ static bool check_beacon(char *pkt)
   return false;
 }
 
+static bool check_none_pkt(char *pkt)
+{
+  if (strncmp(pkt, "NONE", 4) == 0)
+  {
+    return true;
+  }
+  return false;
+}
+
 static void on_pdc(const struct nrf_modem_dect_phy_pdc_event *evt)
 {
 	/* Received RSSI value is in fixed precision format Q14.1 */
@@ -233,22 +243,28 @@ static void on_pdc(const struct nrf_modem_dect_phy_pdc_event *evt)
     else if (!gotData)
     {
       gotData = true;
+
       // LOG_INF("GOT DATA %s", evt->data);
-      memcpy(pingBuf, evt->data, sizeof(Ping_t));
-      // responsePing->ts1 = 31;
-      responsePing->ts2 = 31;
-      strncpy(responsePing->text, "QWER", 4);
     }
   }
 
-  if (iAmMaster) // If we are the FT then we print the ping
-  {
-    LOG_INF("GOT DATA %s", evt->data);
-    memcpy(pingBuf, evt->data, sizeof(Ping_t));
+  // if (iAmMaster) // If we are the FT then we print the ping
+  // {
+    // LOG_INF("GOT DATA %s", evt->data);
+    // memcpy(pingBuf, evt->data, sizeof(Ping_t));
     // LOG_WRN("Ping response received. ts1: %llu, ts2: %llu, ts3: %llu, data: %s, cnt: %d", responsePing->ts1, responsePing->ts2, modem_time, responsePing->text, responsePing->counter);
-    uint64_t diff = modem_time - responsePing->ts1;
+    // uint64_t diff = modem_time - responsePing->ts1;
     // LOG_WRN("Diff %llu ticks,  %llu ms", diff, diff / NRF_MODEM_DECT_MODEM_TIME_TICK_RATE_KHZ);
-    gpio_pin_set_dt(pdcSwitch, 1);
+    // gpio_pin_set_dt(pdcSwitch, 1);
+  // }
+
+  // gpio_pin_set_dt(pdcSwitch, 1);
+  if (!check_none_pkt((char *) evt->data))
+  {
+    struct LeanWiznet_packet *pkt = k_malloc(evt->len + sizeof(struct LeanWiznet_packet)); // JON TODO MAGIC NUMBER
+    pkt->size = evt->len;
+    memcpy(pkt->payload, evt->data, pkt->size);
+    k_queue_append(&ethTxQueue, pkt);
   }
 
   k_sem_give(&rx_done_sem);
@@ -475,15 +491,20 @@ int DectPhy_Init(void)
 
 static void test_point_thread(void)
 {
-  while(gpio_pin_get_dt(slotSwitch) == GPIO_OUTPUT_INACTIVE){}
+  // while(gpio_pin_get_dt(slotSwitch) == GPIO_OUTPUT_INACTIVE){}
   while(true)
   {
-    gpio_pin_toggle_dt(slotSwitch);
+    // gpio_pin_toggle_dt(slotSwitch);
     k_sleep(K_USEC(DECT_SLOT_DURATION_US));
   }
 }
 K_KERNEL_STACK_MEMBER(testPointThreadStack, 256); // JON pound define
 static struct k_thread testPointThreadHandle;
+
+bool DectPhy_WiznetAlert(void) // TODO better way of doing this
+{
+  return true;
+}
 
 void DectPhy_Main(bool master)
 {	
@@ -502,23 +523,27 @@ void DectPhy_Main(bool master)
   iAmMaster = master;
   
   Ping_t pingPkt;
-  strncpy(&pingPkt.text, "TEST", 4);
+  strncpy(pingPkt.text, "TEST", 4);
 
   nrf_modem_dect_phy_time_get(); 
   k_sem_take(&time_sem, K_FOREVER);
 
   uint16_t cnt = 0;
-
-  gpio_pin_set_dt(slotSwitch, 1);
-
+  
   while(true)
   {
+    struct LeanWiznet_packet *pkt = NULL;
+    if (!k_queue_is_empty(&ethRxQueue))
+    {
+      pkt = (struct LeanWiznet_packet *) k_queue_get(&ethRxQueue, K_FOREVER);
+    }
+
     if (master) // FT
     {
       LOG_DBG("LOOP %d BEGINNING", cnt);
       set_all_tps(0);
 
-      const uint64_t start_lead = (4ULL * DECT_SLOT_DURATION_TICK);
+      const uint64_t start_lead = (1ULL * DECT_SLOT_DURATION_TICK);
 
       uint64_t base = modem_time + start_lead;
       
@@ -532,13 +557,20 @@ void DectPhy_Main(bool master)
 
       lastLoopTs = base;
 
-      gpio_pin_set_dt(beaconTxSwitch, 1);
+      // gpio_pin_set_dt(beaconTxSwitch, 1);
       err = transmit(beacon_tx_handle, "BEAC", 4, beacon_tx_start_time); // FAKE BEACON // t = 0
       
-      gpio_pin_set_dt(dlSwitch, 1);
-      err = transmit(ft_tx_handle, &pingPkt, sizeof(Ping_t) , ft_tx_start_time);
+      if (pkt)
+      {
+        // gpio_pin_set_dt(dlSwitch, 1);
+        err = transmit(ft_tx_handle, pkt->payload, pkt->size , ft_tx_start_time);
+      }
+      else
+      {
+        err = transmit(ft_tx_handle, "NONE", 4 , ft_tx_start_time);
+      }
 
-      gpio_pin_set_dt(ulSwitch, 1);
+      // gpio_pin_set_dt(ulSwitch, 1);
       err = receive(ft_rx_handle, 4 * DECT_SLOT_DURATION_TICK, ft_rx_start_time);
 
       for (int i = 0; i < 3; i++) // wait for all 3 operations
@@ -567,7 +599,15 @@ void DectPhy_Main(bool master)
       }
 
       err = receive(pt_rx_handle, 3 * DECT_SLOT_DURATION_TICK, lastPccTs + (2 * DECT_SLOT_DURATION_TICK));
-      err = transmit(pt_tx_handle, responsePing, sizeof(Ping_t), lastPccTs + (5 * DECT_SLOT_DURATION_TICK) + 1);
+
+      if (pkt)
+      {
+        err = transmit(pt_tx_handle, pkt->payload, pkt->size, lastPccTs + (5 * DECT_SLOT_DURATION_TICK) + 1);
+      }
+      else
+      {
+        err = transmit(pt_tx_handle, "NONE", 4, lastPccTs + (5 * DECT_SLOT_DURATION_TICK) + 1);
+      }
 
       for (int i = 0; i < 2; i++)
       {
@@ -575,6 +615,11 @@ void DectPhy_Main(bool master)
       }
 
       LOG_DBG("LOOP COMPLETE %s %s", (gotBeacon) ? "BEACON" : "", (gotData) ? "DATA" : "");
+    }
+
+    if (pkt)
+    {
+      k_free(pkt);
     }
   }
 }
