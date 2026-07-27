@@ -8,7 +8,7 @@ typedef struct DectPacket_s
 
 typedef struct DectBeaconMessage_s
 {
-
+  
 } DectBeaconMessage_t;
 
 typedef struct DectTimesyncMessage_s

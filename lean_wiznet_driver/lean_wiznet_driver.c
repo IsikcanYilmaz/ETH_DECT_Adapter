@@ -235,7 +235,7 @@ static int w5500_tx(struct LeanWiznet_config *cfg, struct LeanWiznet_runtime *ct
 	return 0;
 }
 
-static struct LeanWiznet_packet* w5500_rx(struct LeanWiznet_config *cfg, struct LeanWiznet_runtime *ctx)
+static struct LeanWiznet_Packet* w5500_rx(struct LeanWiznet_config *cfg, struct LeanWiznet_runtime *ctx)
 {
 	uint8_t header[2];
 	uint8_t tmp[2];
@@ -265,7 +265,13 @@ static struct LeanWiznet_packet* w5500_rx(struct LeanWiznet_config *cfg, struct 
 	w5500_readbuf(cfg, off, header, 2); // From read pointer read 2 bytes
 	rx_len = sys_get_be16(header) - 2;
 
-  struct LeanWiznet_packet *buf = (struct LeanWiznet_packet *) k_malloc(rx_len + sizeof(struct LeanWiznet_packet));
+  struct LeanWiznet_Packet *buf = (struct LeanWiznet_Packet *) k_malloc(rx_len + sizeof(struct LeanWiznet_Packet));
+
+  if (buf == NULL)
+  {
+    LOG_ERR("%s k_malloc ran out of space", __FUNCTION__);
+    return NULL;
+  }
   
 	read_len = rx_len;
 	reader = off + 2;
@@ -410,7 +416,7 @@ static void w5500_rx_thread(void *p1, void *p2, void *p3)
 
           if (ir & S0_IR_RECV && rxcb)
           {
-            struct LeanWiznet_packet *pkt = w5500_rx(cfg, ctx); // Only do the reception if there's a callback attached
+            struct LeanWiznet_Packet *pkt = w5500_rx(cfg, ctx); // Only do the reception if there's a callback attached
             if (pkt)
             {
               k_queue_append(&ethRxQueue, pkt);
@@ -439,8 +445,7 @@ static void w5500_tx_thread(void *p1, void *p2, void *p3)
 
   while (true)
   {
-    struct LeanWiznet_packet *pkt = k_queue_get(&ethTxQueue, K_FOREVER);
-
+    struct LeanWiznet_Packet *pkt = k_queue_get(&ethTxQueue, K_FOREVER);
     LOG_DBG("TX Packet %d bytes", pkt->size);
     LOG_HEXDUMP_INF(pkt->payload, pkt->size, "TX THREAD");
     w5500_tx(cfg, ctx, pkt->payload, pkt->size);

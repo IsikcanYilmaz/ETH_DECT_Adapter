@@ -97,7 +97,7 @@ struct LeanWiznet_config {
 	const struct device *phy_dev;
 };
 
-#define LEAN_WIZNET_THREAD_STACK_SIZE 1024 // TODO may be too big. Consider having net_bufs and fragments instead of big memory chunks or use the heap 
+#define LEAN_WIZNET_THREAD_STACK_SIZE 800 // TODO may be too big. Consider having net_bufs and fragments instead of big memory chunks or use the heap 
 #define LEAN_WIZNET_THREAD_PRIO 2
 #define LEAN_WIZNET_MONITOR_PERIOD_MS 500
 #define LEAN_WIZNET_SPI_MUTEX_TIMEOUT_MS 10000
@@ -118,7 +118,7 @@ struct LeanWiznet_runtime {
 	uint8_t buf[1500]; // JON pound define
 };
 
-struct LeanWiznet_packet{
+struct LeanWiznet_Packet{
   uint32_t reserved; // k_queue_append uses the first 4 bytes of this for internal book keeping
   uint16_t size;
   char payload[];
@@ -126,7 +126,7 @@ struct LeanWiznet_packet{
 
 struct LeanWiznet_QueueItem {
   uint32_t reserved;
-  struct LeanWiznet_packet pkt;
+  struct LeanWiznet_Packet pkt;
 } __attribute__((packed));
 
 typedef void (*RxHappenedCallback)(void); // TODO maybe a more detailed callback? 
