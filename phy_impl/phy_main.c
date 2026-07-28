@@ -56,9 +56,9 @@ static volatile enum DectPtStateMachine_e PtState = PT_STATE_WAIT_FOR_BEACON;
 #define DECT_GAP_US (100) // ?
 #define DECT_GAP_TICK ((uint64_t) (DECT_GAP_US * NRF_MODEM_DECT_MODEM_TIME_TICK_RATE_KHZ) / 1000)
 
-#define DECT_OPS_PER_BEACON (24/2)
+#define DECT_OPS_PER_BEACON 108
 
-#define DECT_MASTER_BEACON_PERIOD_TICK (100 * 24 * DECT_SLOT_DURATION_TICK)
+#define DECT_MASTER_BEACON_PERIOD_TICK (20 * 24 * DECT_SLOT_DURATION_TICK)
 
 inline uint64_t us_to_modem_ticks(uint64_t us)
 {
@@ -101,17 +101,19 @@ static volatile uint64_t modem_time;
 static uint32_t slotCounter = 0;
 static uint32_t frameCounter = 0;
 
-static uint64_t lastPccTs = 0;
-static uint64_t lastPdcTs = 0;
-static uint64_t lastBeaconTs = 0;
-static uint64_t lastLoopTs = 0;
+static uint64_t lastPccModemTick = 0;
+static uint64_t lastPdcModemTick = 0;
+static uint64_t lastBeaconModemTick = 0;
+static uint64_t lastLoopModemTick = 0;
+
+static uint32_t lastBeaconTs = 0;
 
 const uint32_t beacon_tx_handle = 0;
 const uint32_t beacon_rx_handle = 1;
-const uint32_t ft_tx_handle = 200;
-const uint32_t ft_rx_handle = 300;
-const uint32_t pt_tx_handle = 400;
-const uint32_t pt_rx_handle = 500;
+const uint32_t ft_tx_handle = 2000;
+const uint32_t ft_rx_handle = 3000;
+const uint32_t pt_tx_handle = 4000;
+const uint32_t pt_rx_handle = 5000;
 
 const uint32_t test_tx_handle = 900;
 const uint32_t test_rx_handle = 1000;
@@ -243,7 +245,7 @@ static int transmit_head_of_queue(uint32_t handle, uint64_t start_time)
   if (!k_queue_is_empty(&ethRxQueue))
   {
     struct LeanWiznet_Packet *pkt = (struct LeanWiznet_Packet *) k_queue_get(&ethRxQueue, K_FOREVER);
-    LOG_WRN("%d BYTES READ FROM ETH, SCHEDULED FOR TX AT %llu", pkt->size, start_time);
+    LOG_DBG("%d BYTES READ FROM ETH, SCHEDULED FOR TX AT %llu", pkt->size, start_time);
     err = transmit(handle, pkt->payload, pkt->size, start_time);
     inFlight->ptr = (void *) pkt;
   }
@@ -303,7 +305,7 @@ static void on_capability_get(const struct nrf_modem_dect_phy_capability_get_eve
 static void on_pcc(const struct nrf_modem_dect_phy_pcc_event *evt)
 {
 	LOG_INF("PCC Received header from device ID %d", evt->hdr.hdr_type_1.transmitter_id_hi << 8 | evt->hdr.hdr_type_1.transmitter_id_lo);
-  lastPccTs = modem_time;
+  lastPccModemTick = modem_time;
 }
 
 static void on_pcc_crc_err(const struct nrf_modem_dect_phy_pcc_crc_failure_event *evt)
@@ -315,11 +317,11 @@ static void on_op_complete_pt(const struct nrf_modem_dect_phy_op_complete_event 
 {
   // LOG_WRN("%s", __FUNCTION__);
   
-  if (evt->handle == pt_tx_handle) 
+  if (evt->handle == pt_tx_handle) // Previous Uplink slot ended. schedule next downlink slot
   {
-    int err = receive(pt_rx_handle + slotCounter, 4 * DECT_SLOT_DURATION_TICK, 0);
+    int err = receive(pt_rx_handle + slotCounter, 100 * DECT_SLOT_DURATION_TICK + 2 * opTransitionLatency, 0); // schedule next rx slot
     slotCounter++;
-    PtState = (slotCounter < 12) ? PT_STATE_SCHEDULED_DOWNLINK : PT_STATE_WAIT_FOR_BEACON;
+    PtState = (slotCounter < DECT_OPS_PER_BEACON) ? PT_STATE_SCHEDULED_DOWNLINK : PT_STATE_WAIT_FOR_BEACON;
     gpio_pin_toggle_dt(ulSwitch);
 
     // Tx just completed. Free the pointer of what just got tx'd. 
@@ -332,7 +334,8 @@ static void on_op_complete_pt(const struct nrf_modem_dect_phy_op_complete_event 
       struct DectInFlightPktStub_s *pktToFree = k_queue_get(&inFlightQueue, K_FOREVER);
       if (pktToFree)
       {
-        LOG_WRN("IN FLIGHT PKT FROM HANDLE %d DONE. 0x%08x. FREEING", pktToFree->handle, pktToFree->ptr);
+        if (pktToFree->ptr)
+          LOG_DBG("IN FLIGHT PKT FROM HANDLE %d DONE. 0x%08x. FREEING", pktToFree->handle, pktToFree->ptr);
         k_free(pktToFree->ptr);
         k_free(pktToFree);
       }
@@ -351,13 +354,14 @@ static void on_pdc_pt(const struct nrf_modem_dect_phy_pdc_event *evt) // TODO ma
         // We received data while waiting for the beacon. Check if it is a beacon. If so, kick off the current frame's states
         if (check_beacon((char *) evt->data))
         {
-          err = receive(pt_rx_handle + slotCounter, 4 * DECT_SLOT_DURATION_TICK, 0);
+          err = receive(pt_rx_handle + slotCounter, 100 * DECT_SLOT_DURATION_TICK + 2 * opTransitionLatency, 0);
           if (err)
           {
             LOG_ERR("%s ERROR SCHEDULING RECEIVE", err);
             break;
           }
-          lastBeaconTs = modem_time;
+          lastBeaconModemTick = modem_time;
+          lastBeaconTs = k_uptime_get();
           gpio_pin_toggle_dt(beaconRxSwitch);
           slotCounter = 1;
           PtState = PT_STATE_SCHEDULED_DOWNLINK;
@@ -371,12 +375,19 @@ static void on_pdc_pt(const struct nrf_modem_dect_phy_pdc_event *evt) // TODO ma
       }
     case PT_STATE_SCHEDULED_DOWNLINK:
       {
+        err = transmit_head_of_queue(pt_tx_handle, modem_time + 2 * opTransitionLatency);
         if (!check_none_pkt(evt->data))
         {
+          LOG_DBG("PT RECEIVED %d BYTES FROM FT IN SLOT %d", evt->len, slotCounter);
           LOG_HEXDUMP_DBG(evt->data, evt->len, "RX");
+
+          // We got a packet from the DECT connection. Enqueue it to wiznet's tx queue // TODO reduce code dupes
+          struct LeanWiznet_Packet *pkt = k_malloc(sizeof(struct LeanWiznet_Packet) + evt->len);
+          memcpy(pkt->payload, evt->data, evt->len);
+          pkt->size = evt->len;
+          k_queue_append(&ethTxQueue, pkt);
         }
         // err = transmit(pt_tx_handle, "TEST", 4, 0);
-        err = transmit_head_of_queue(pt_tx_handle, 0);
         slotCounter++;
         gpio_pin_toggle_dt(dlSwitch);
         PtState = PT_STATE_SCHEDULED_UPLINK;
@@ -426,9 +437,9 @@ static void on_op_complete_ft(const struct nrf_modem_dect_phy_op_complete_event 
     if (evt->err == 0)
     {
       gpio_pin_toggle_dt(dlSwitch);
-      if (slotCounter < 12)
+      if (slotCounter < DECT_OPS_PER_BEACON)
       {
-        err = receive(ft_rx_handle + slotCounter, DECT_SLOT_DURATION_TICK + opTransitionLatency, modem_time + (2 * opTransitionLatency));
+        err = receive(ft_rx_handle + slotCounter, 2 * DECT_SLOT_DURATION_TICK + (2 * opTransitionLatency), modem_time + (2 * opTransitionLatency));
         if (err)
         {
           LOG_ERR("Error scheduling rx %d", err);
@@ -446,7 +457,8 @@ static void on_op_complete_ft(const struct nrf_modem_dect_phy_op_complete_event 
       struct DectInFlightPktStub_s *pktToFree = k_queue_get(&inFlightQueue, K_FOREVER);
       if (pktToFree)
       {
-        LOG_DBG("IN FLIGHT PKT FROM HANDLE %d DONE. 0x%08x. FREEING", pktToFree->handle, pktToFree->ptr);
+        if (pktToFree->ptr)
+          LOG_DBG("IN FLIGHT PKT FROM HANDLE %d DONE. 0x%08x. FREEING", pktToFree->handle, pktToFree->ptr);
         k_free(pktToFree->ptr);
         k_free(pktToFree);
       }
@@ -458,7 +470,7 @@ static void on_op_complete_ft(const struct nrf_modem_dect_phy_op_complete_event 
     if (evt->err == 0)
     {
       gpio_pin_toggle_dt(ulSwitch);
-      if (slotCounter < 12)
+      if (slotCounter < DECT_OPS_PER_BEACON)
       {
         // err = transmit(ft_tx_handle + slotCounter, "TEST", 4, modem_time + (1) * (2 * opTransitionLatency));
         err = transmit_head_of_queue(ft_tx_handle + slotCounter, modem_time + (1) * (2 * opTransitionLatency));
@@ -480,7 +492,19 @@ static void on_op_complete_ft(const struct nrf_modem_dect_phy_op_complete_event 
 
 static void on_pdc_ft(const struct nrf_modem_dect_phy_pdc_event *evt) // TODO make this part as lean as possible. just copy over the bytes and let a thread do processing
 {
-  LOG_HEXDUMP_WRN(evt->data, evt->len, "RX");
+  // LOG_HEXDUMP_WRN(evt->data, evt->len, "RX");
+  LOG_DBG("%s", __FUNCTION__);
+  if (!check_none_pkt(evt->data))
+  {
+    LOG_DBG("%s %d handle, %d bytes", __FUNCTION__, evt->handle, evt->len);
+    LOG_HEXDUMP_DBG(evt->data, evt->len, "RX");
+    
+    // We got a packet from the DECT connection. Enqueue it to wiznet's tx queue
+    struct LeanWiznet_Packet *pkt = k_malloc(sizeof(struct LeanWiznet_Packet) + evt->len);
+    memcpy(pkt->payload, evt->data, evt->len);
+    pkt->size = evt->len;
+    k_queue_append(&ethTxQueue, pkt);
+  }
   k_sem_give(&rx_done_sem);
 }
 
@@ -594,7 +618,7 @@ static void dect_phy_event_handler(const struct nrf_modem_dect_phy_event *evt)
 		on_pcc_crc_err(&evt->pcc_crc_err);
 		break;
 	case NRF_MODEM_DECT_PHY_EVT_PDC:
-    lastPdcTs = modem_time;
+    lastPdcModemTick = modem_time;
     if (iAmMaster)
     {
 		  on_pdc_ft(&evt->pdc);
@@ -731,19 +755,15 @@ void DectPhy_Main(bool master)
   
   set_all_tps(0);
 
+  // LOG_WRN("ATTACH DEBUGGER NOW IF YOU WANT");
+  // k_sleep(K_MSEC(5000));
+
   nrf_modem_dect_phy_time_get(); 
 
   uint16_t cnt = 0;
 
   while(true)
   {
-    // struct LeanWiznet_Packet *pkt = NULL;
-    // if (!k_queue_is_empty(&ethRxQueue))
-    // {
-    //   pkt = (struct LeanWiznet_Packet *) k_queue_get(&ethRxQueue, K_FOREVER);
-    //   LOG_WRN("%d BYTES READ FROM ETH", pkt->size);
-    // }
-
     if (iAmMaster) // FT
     {
       LOG_DBG("LOOP %d BEGINNING", cnt);
@@ -769,20 +789,15 @@ void DectPhy_Main(bool master)
         continue;
       }
 
-      LOG_WRN("PT BEACON RECEIVED");
+      LOG_DBG("PT BEACON RECEIVED");
 
-      while (PtState > PT_STATE_WAIT_FOR_BEACON)
+      while (PtState > PT_STATE_WAIT_FOR_BEACON && k_uptime_get() - lastBeaconTs < MODEM_TICKS_TO_MS(DECT_MASTER_BEACON_PERIOD_TICK))
       {
-        k_sleep(K_USEC(100));
+        k_sleep(K_USEC(1));
       }
 
-      LOG_WRN("PT UNLATCHED");
+      LOG_DBG("PT UNLATCHED");
     }
-
-    // if (pkt)
-    // {
-    //   k_free(pkt);
-    // }
   }
 }
 
