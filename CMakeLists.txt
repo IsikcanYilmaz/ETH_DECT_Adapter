@@ -21,4 +21,6 @@ target_sources(app PRIVATE
   mac_impl/dect_adapter.c
   mac_impl/mac_main.c
   phy_impl/phy_main.c
+  phy_impl/pt.c
+  phy_impl/ft.c
 )
