@@ -41,7 +41,8 @@ uint32_t tx_idleToActiveLatency;
 uint32_t tx_activeToIdleLatency;
 uint32_t rx_idleToActiveLatency;
 
-volatile enum DectPtStateMachine_e PtState = PT_STATE_WAIT_FOR_BEACON;
+volatile enum DectPtState_e PtState = PT_STATE_WAIT_FOR_BEACON;
+volatile enum DectFtState_e FtState = FT_STATE_IDLE;
 
 inline uint64_t us_to_modem_ticks(uint64_t us)
 {

@@ -42,6 +42,11 @@ enum DectPtStateMachine_e
   PT_STATE_MAX,
 };
 
+enum DectFtState_e
+{
+
+}
+
 struct DectInFlightPktStub_s
 {
   uint32_t reserved;
@@ -73,7 +78,8 @@ enum DectOperationHandleType_e
 
 // TODO find a better place to put these or just do something else. When we have better clarity about the hw/fw situation
 extern volatile uint64_t modem_time;
-extern volatile enum DectPtStateMachine_e PtState;
+extern volatile enum DectPtState_e PtState;
+extern volatile enum DectFtState_e FtState;
 extern volatile bool warmUp;
 extern uint32_t slotCounter;
 
