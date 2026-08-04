@@ -35,7 +35,7 @@ static void on_op_complete_ft(const struct nrf_modem_dect_phy_op_complete_event 
   int err;
   slotCounter++;
 
-  if (evt->handle == BEACON_TX_HANDLE)
+  if (evt->handle == BEACON_TX_HANDLE) // BEACON TX DONE. SCHEDULE NEXT BEACON AND SCHEDULE DOWNLINK TX
   {
     if (evt->err == 0)
     {
@@ -48,6 +48,8 @@ static void on_op_complete_ft(const struct nrf_modem_dect_phy_op_complete_event 
       {
         LOG_ERR("Error scheduling tx %d", err);
       }
+
+      ftState = FT_STATE_SCHEDULED_DOWNLINK;
     }
   }
   else if (evt->handle >= FT_TX_HANDLE && evt->handle < FT_RX_HANDLE) // TX GOT DONE. SCHEDULE RX
@@ -61,6 +63,8 @@ static void on_op_complete_ft(const struct nrf_modem_dect_phy_op_complete_event 
         {
           LOG_ERR("Error scheduling rx %d", err);
         }
+
+        ftState = FT_STATE_SCHEDULED_UPLINK;
       }
     }
 
@@ -74,28 +78,33 @@ static void on_op_complete_ft(const struct nrf_modem_dect_phy_op_complete_event 
       gpio_pin_toggle_dt(ulSwitch);
       if (slotCounter < DECT_OPS_PER_BEACON)
       {
-        // err = transmit(ft_tx_handle + slotCounter, "TEST", 4, modem_time + (1) * (2 * opTransitionLatency));
         err = DectPhy_TransmitHeadOfQueue(FT_TX_HANDLE + slotCounter, modem_time + (1) * (2 * opTransitionLatency));
         if (err)
         {
           LOG_ERR("Error scheduling tx %d", err);
         }
+
+        ftState = FT_STATE_SCHEDULED_DOWNLINK;
       }
     }
   }
 
   if (evt->err)
   {
-    LOG_ERR("op_complete %s cb time %"PRIu64" status %x handle %d slotCounter %d", !is_rx_handle(evt->handle) ? "TX" : "RX", modem_time, evt->err, evt->handle, slotCounter);
+    LOG_ERR("op_complete %s cb time %"PRIu64" status %x handle %d slotCounter %d", !IS_RX_HANDLE(evt->handle) ? "TX" : "RX", modem_time, evt->err, evt->handle, slotCounter);
+  
+    ftState = FT_STATE_IDLE;
+    warmedUp = false;
   }
 
   k_sem_give(&operation_sem);
 }
 
+// This kicks off FTs loop
 static void on_time_get_ft(const struct nrf_modem_dect_phy_time_get_event *evt)
 {
 	LOG_DBG("time_get cb time %"PRIu64" status %x", modem_time, evt->err);
-  if (!warmUp)
+  if (!warmedUp)
   {
     int err;
     uint64_t base = modem_time + 50 * DECT_SLOT_DURATION_TICK;
@@ -103,6 +112,7 @@ static void on_time_get_ft(const struct nrf_modem_dect_phy_time_get_event *evt)
     
     LOG_WRN("Modem time %llu, Base %llu, beacon tx at %llu, DL at %llu", modem_time, base, base, base + (2 * DECT_SLOT_DURATION_TICK));
 
+    ftState = FT_STATE_SCHEDULED_BEACON;
     err = DectPhy_TransmitBeacon(base);
 
     if (err)
@@ -110,7 +120,7 @@ static void on_time_get_ft(const struct nrf_modem_dect_phy_time_get_event *evt)
       LOG_ERR("%s ERR %x", __FUNCTION__, err);
     }
   }
-  warmUp = true;
+  warmedUp = true;
   k_sem_give(&time_sem);
 }
 
@@ -128,7 +138,6 @@ void Ft_HandleEvent(const struct nrf_modem_dect_phy_event *evt)
   {
 		on_time_get_ft(&evt->time_get);
   }
-
 }
 
 void Ft_Init(void)
@@ -140,6 +149,18 @@ void Ft_InfiniteLoop(void)
 {
   while(true)
   {
-    k_sleep(K_MSEC(1000));
+    if (warmedUp)
+    {
+      k_sleep(K_MSEC(100));
+    }
+    else
+    {
+      // TODO : Currently, if an error happens we simply restart this loop of
+      // time_get() -> schedule beacon -> schedule DL -> UL -> ....
+      // However it doesnt have to be this way. When you have time make this better, 
+      // i.e. if an error happens, simply keep in the loop, dont break out.
+      LOG_ERR("FT LOOP RESTARTING"); 
+      nrf_modem_dect_phy_time_get(); 
+    }
   }
 }

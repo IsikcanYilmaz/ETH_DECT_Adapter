@@ -41,8 +41,8 @@ uint32_t tx_idleToActiveLatency;
 uint32_t tx_activeToIdleLatency;
 uint32_t rx_idleToActiveLatency;
 
-volatile enum DectPtState_e PtState = PT_STATE_WAIT_FOR_BEACON;
-volatile enum DectFtState_e FtState = FT_STATE_IDLE;
+volatile enum DectPtState_e ptState = PT_STATE_WAIT_FOR_BEACON;
+volatile enum DectFtState_e ftState = FT_STATE_IDLE;
 
 inline uint64_t us_to_modem_ticks(uint64_t us)
 {
@@ -67,7 +67,7 @@ static void set_all_tps(int set)
 
 static bool exit;
 static uint16_t device_id;
-volatile bool warmUp = false;
+volatile bool warmedUp = false;
 volatile uint64_t modem_time;
 
 uint32_t slotCounter = 0;
@@ -443,29 +443,6 @@ static void on_cancel(const struct nrf_modem_dect_phy_cancel_event *evt)
   k_sem_give(&cancel_sem);
 }
 
-// This kicks off the FT's loop
-static void on_time_get(const struct nrf_modem_dect_phy_time_get_event *evt)
-{
-	LOG_DBG("time_get cb time %"PRIu64" status %x", modem_time, evt->err);
-  if (!warmUp && iAmMaster)
-  {
-    int err;
-    uint64_t base = modem_time + 50 * DECT_SLOT_DURATION_TICK;
-    uint64_t downlinkScheduleTick = base + (3 * DECT_SLOT_DURATION_TICK) + opTransitionLatency; 
-    
-    LOG_WRN("Modem time %llu, Base %llu, beacon tx at %llu, DL at %llu", modem_time, base, base, base + (2 * DECT_SLOT_DURATION_TICK));
-
-    err = DectPhy_TransmitBeacon(base);
-
-    if (err)
-    {
-      LOG_ERR("%s ERR %x", __FUNCTION__, err);
-    }
-  }
-  warmUp = true;
-  k_sem_give(&time_sem);
-}
-
 static void dect_phy_event_handler(const struct nrf_modem_dect_phy_event *evt)
 {
   modem_time = evt->time;
@@ -492,7 +469,8 @@ static void dect_phy_event_handler(const struct nrf_modem_dect_phy_event *evt)
 	case NRF_MODEM_DECT_PHY_EVT_COMPLETED:
     if (iAmMaster)
     {
-      on_op_complete_ft(&evt->op_complete);
+      // on_op_complete_ft(&evt->op_complete);
+      Ft_HandleEvent(evt);
     }
     else
     {
@@ -516,7 +494,8 @@ static void dect_phy_event_handler(const struct nrf_modem_dect_phy_event *evt)
     lastPdcModemTick = modem_time;
     if (iAmMaster)
     {
-		  on_pdc_ft(&evt->pdc);
+		  // on_pdc_ft(&evt->pdc);
+      Ft_HandleEvent(evt);
     }
     else 
     {
@@ -528,7 +507,8 @@ static void dect_phy_event_handler(const struct nrf_modem_dect_phy_event *evt)
 		on_pdc_crc_err(&evt->pdc_crc_err);
 		break;
 	case NRF_MODEM_DECT_PHY_EVT_TIME:
-		on_time_get(&evt->time_get);
+    Ft_HandleEvent(evt);
+		// on_time_get(&evt->time_get);
 		break;
 	case NRF_MODEM_DECT_PHY_EVT_CAPABILITY:
 		on_capability_get(&evt->capability_get);
@@ -658,6 +638,7 @@ void DectPhy_Main(bool master)
   }
 
   nrf_modem_dect_phy_time_get(); 
+  k_sem_take(&time_sem, K_FOREVER);
 
   if (iAmMaster)
   {

@@ -15,7 +15,7 @@ extern struct k_sem *time_sem;
 static void on_pdc_pt(const struct nrf_modem_dect_phy_pdc_event *evt) // TODO make this part as lean as possible. just copy over the bytes and let a thread do processing
 {
   int err;
-  switch(PtState)
+  switch(ptState)
   {
     case PT_STATE_WAIT_FOR_BEACON: 
       {
@@ -32,7 +32,7 @@ static void on_pdc_pt(const struct nrf_modem_dect_phy_pdc_event *evt) // TODO ma
           lastBeaconTs = k_uptime_get();
           gpio_pin_toggle_dt(beaconRxSwitch);
           slotCounter = 1;
-          PtState = PT_STATE_SCHEDULED_DOWNLINK;
+          ptState = PT_STATE_SCHEDULED_DOWNLINK;
           LOG_DBG("BEACON RECEIVED. STATE -> SCHEDULED DOWNLINK");
         }
         else
@@ -62,7 +62,7 @@ static void on_pdc_pt(const struct nrf_modem_dect_phy_pdc_event *evt) // TODO ma
         // err = transmit(pt_tx_handle, "TEST", 4, 0);
         slotCounter++;
         gpio_pin_toggle_dt(dlSwitch);
-        PtState = PT_STATE_SCHEDULED_UPLINK;
+        ptState = PT_STATE_SCHEDULED_UPLINK;
         break;
       }
     case PT_STATE_SCHEDULED_UPLINK:
@@ -92,7 +92,7 @@ static void on_op_complete_pt(const struct nrf_modem_dect_phy_op_complete_event 
   {
     int err = DectPhy_Receive(PT_RX_HANDLE + slotCounter, 100 * DECT_SLOT_DURATION_TICK + 2 * opTransitionLatency, 0); // schedule next rx slot
     slotCounter++;
-    PtState = (slotCounter < DECT_OPS_PER_BEACON) ? PT_STATE_SCHEDULED_DOWNLINK : PT_STATE_WAIT_FOR_BEACON;
+    ptState = (slotCounter < DECT_OPS_PER_BEACON) ? PT_STATE_SCHEDULED_DOWNLINK : PT_STATE_WAIT_FOR_BEACON;
     gpio_pin_toggle_dt(ulSwitch);
     DectPhy_InFlightCompleted();
   }
@@ -103,22 +103,7 @@ static void on_op_complete_pt(const struct nrf_modem_dect_phy_op_complete_event 
 static void on_time_get_pt(const struct nrf_modem_dect_phy_time_get_event *evt)
 {
 	LOG_DBG("time_get cb time %"PRIu64" status %x", modem_time, evt->err);
-  if (!warmUp)
-  {
-    int err;
-    uint64_t base = modem_time + 50 * DECT_SLOT_DURATION_TICK;
-    uint64_t downlinkScheduleTick = base + (3 * DECT_SLOT_DURATION_TICK) + opTransitionLatency; 
-    
-    LOG_WRN("Modem time %llu, Base %llu, beacon tx at %llu, DL at %llu", modem_time, base, base, base + (2 * DECT_SLOT_DURATION_TICK));
-
-    err = DectPhy_TransmitBeacon(base);
-
-    if (err)
-    {
-      LOG_ERR("%s ERR %x", __FUNCTION__, err);
-    }
-  }
-  warmUp = true;
+  warmedUp = true;
   k_sem_give(&time_sem);
 }
 
@@ -150,7 +135,7 @@ void Pt_InfiniteLoop(void)
 {
   while(true)
   { 
-    if (!warmUp)
+    if (!warmedUp)
     {
       k_sem_take(&time_sem, K_FOREVER);
     }
@@ -160,7 +145,7 @@ void Pt_InfiniteLoop(void)
     int err = DectPhy_Receive(BEACON_RX_HANDLE, US_TO_MODEM_TICKS(1000000), 0); // GET FAKE BEACON
     k_sem_take(&operation_sem, K_FOREVER);
 
-    if (PtState == PT_STATE_WAIT_FOR_BEACON)
+    if (ptState == PT_STATE_WAIT_FOR_BEACON)
     {
       // LOG_WRN("PT BEACON NOT RECEIVED");
       continue;
@@ -168,14 +153,12 @@ void Pt_InfiniteLoop(void)
 
     LOG_DBG("PT BEACON RECEIVED");
 
-    while (PtState > PT_STATE_WAIT_FOR_BEACON && k_uptime_get() - lastBeaconTs < MODEM_TICKS_TO_MS(DECT_MASTER_BEACON_PERIOD_TICK))
+    while (ptState > PT_STATE_WAIT_FOR_BEACON && k_uptime_get() - lastBeaconTs < MODEM_TICKS_TO_MS(DECT_MASTER_BEACON_PERIOD_TICK))
     {
       k_sleep(K_USEC(1));
     }
 
     LOG_DBG("PT UNLATCHED");
-
-
   }
 }
 

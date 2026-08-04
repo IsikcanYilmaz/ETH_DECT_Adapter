@@ -17,6 +17,9 @@
 
 #define DECT_MASTER_BEACON_PERIOD_TICK (20 * 24 * DECT_SLOT_DURATION_TICK)
 
+#define IS_RX_HANDLE(x) (x == BEACON_RX_HANDLE || (x >= FT_RX_HANDLE && x < PT_TX_HANDLE) || (x >= PT_RX_HANDLE && x < TEST_TX_HANDLE))
+#define IS_TX_HANDLE(x) (x == BEACON_TX_HANDLE || (x >= FT_TX_HANDLE && x < FT_RX_HANDLE) || (x >= PT_TX_HANDLE && x < PT_RX_HANDLE))
+
 // TODO decide what to do with these
 typedef struct DectPacket_s
 {
@@ -33,7 +36,7 @@ typedef struct DectTimesyncMessage_s
   
 } DectTimesyncMessage_t;
 
-enum DectPtStateMachine_e
+enum DectPtState_e
 {
   PT_STATE_WAIT_FOR_BEACON,
   PT_STATE_SCHEDULED_DOWNLINK,
@@ -44,8 +47,12 @@ enum DectPtStateMachine_e
 
 enum DectFtState_e
 {
-
-}
+  FT_STATE_IDLE,
+  FT_STATE_SCHEDULED_BEACON,
+  FT_STATE_SCHEDULED_DOWNLINK,
+  FT_STATE_SCHEDULED_UPLINK,
+  FT_STATE_MAX,
+};
 
 struct DectInFlightPktStub_s
 {
@@ -78,9 +85,9 @@ enum DectOperationHandleType_e
 
 // TODO find a better place to put these or just do something else. When we have better clarity about the hw/fw situation
 extern volatile uint64_t modem_time;
-extern volatile enum DectPtState_e PtState;
-extern volatile enum DectFtState_e FtState;
-extern volatile bool warmUp;
+extern volatile enum DectPtState_e ptState;
+extern volatile enum DectFtState_e ftState;
+extern volatile bool warmedUp;
 extern uint32_t slotCounter;
 
 extern uint32_t frameCounter;
