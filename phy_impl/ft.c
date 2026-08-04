@@ -40,8 +40,8 @@ static void on_op_complete_ft(const struct nrf_modem_dect_phy_op_complete_event 
     if (evt->err == 0)
     {
       err = DectPhy_Transmit(BEACON_TX_HANDLE, "BEAC", 4, modem_time + DECT_MASTER_BEACON_PERIOD_TICK); // Next beacon
-      // err = transmit(ft_tx_handle, "TEST", 4, modem_time + (1) * (2 * opTransitionLatency));
       err = DectPhy_TransmitHeadOfQueue(FT_TX_HANDLE, modem_time + (1) * (2 * opTransitionLatency));
+
       slotCounter = 0;
       gpio_pin_toggle_dt(beaconTxSwitch);
       if (err)
@@ -137,6 +137,10 @@ void Ft_HandleEvent(const struct nrf_modem_dect_phy_event *evt)
   else if (evt->id == NRF_MODEM_DECT_PHY_EVT_TIME)
   {
 		on_time_get_ft(&evt->time_get);
+  }
+  else
+  {
+    LOG_ERR("FT Unhandled event %d", evt->id);
   }
 }
 

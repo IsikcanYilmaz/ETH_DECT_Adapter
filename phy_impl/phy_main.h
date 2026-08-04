@@ -13,9 +13,11 @@
 #define DECT_GAP_US (100) // ?
 #define DECT_GAP_TICK ((uint64_t) (DECT_GAP_US * NRF_MODEM_DECT_MODEM_TIME_TICK_RATE_KHZ) / 1000)
 
-#define DECT_OPS_PER_BEACON 108
+// #define DECT_OPS_PER_BEACON 20 //164
+#define DECT_OPS_PER_BEACON 164
 
-#define DECT_MASTER_BEACON_PERIOD_TICK (20 * 24 * DECT_SLOT_DURATION_TICK)
+// #define DECT_MASTER_BEACON_PERIOD_TICK (10 * 24 * DECT_SLOT_DURATION_TICK) //(30 * 24 * DECT_SLOT_DURATION_TICK)
+#define DECT_MASTER_BEACON_PERIOD_TICK (30 * 24 * DECT_SLOT_DURATION_TICK)
 
 #define IS_RX_HANDLE(x) (x == BEACON_RX_HANDLE || (x >= FT_RX_HANDLE && x < PT_TX_HANDLE) || (x >= PT_RX_HANDLE && x < TEST_TX_HANDLE))
 #define IS_TX_HANDLE(x) (x == BEACON_TX_HANDLE || (x >= FT_TX_HANDLE && x < FT_RX_HANDLE) || (x >= PT_TX_HANDLE && x < PT_RX_HANDLE))
@@ -81,6 +83,12 @@ enum DectOperationHandleType_e
   TX_HANDLE_TYPE,
   RX_HANDLE_TYPE,
   MAX_HANDLE_TYPE,
+};
+
+enum DectPacketLengthType_e
+{
+  DECT_PACKET_LENGTH_SUBSLOT = 0,
+  DECT_PACKET_LENGTH_SLOT = 1
 };
 
 // TODO find a better place to put these or just do something else. When we have better clarity about the hw/fw situation

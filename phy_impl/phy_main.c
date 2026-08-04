@@ -7,6 +7,7 @@
 #include <zephyr/logging/log.h>
 #include <zephyr/drivers/hwinfo.h>
 #include <zephyr/drivers/gpio.h>
+#include <zephyr/shell/shell.h>
 #include "lean_wiznet_driver.h"
 #include "phy_main.h"
 #include "pt.h"
@@ -16,7 +17,7 @@ LOG_MODULE_REGISTER(dect_phy, LOG_LEVEL_WRN);
 
 #define CONFIG_CARRIER (1677) // from overlay-eu.conf
 
-extern struct k_queue ethTxQueue;
+extern struct k_queue ethTxQueue; // TODO JON There comes a point where we dont free these things
 extern struct k_queue ethRxQueue;
 
 K_QUEUE_DEFINE(inFlightQueue); // on transmission op completes, free these pointers
@@ -133,7 +134,7 @@ int DectPhy_Transmit(uint32_t handle, void *data, size_t data_len, uint64_t star
 
   struct phy_ctrl_field_common header = {
     .header_format = 0x0,
-    .packet_length_type = 0x1,
+    .packet_length_type = DECT_PACKET_LENGTH_SLOT,
     .packet_length = 0x01,
     .short_network_id = (CONFIG_APP_NETWORK_ID & 0xff),
     .transmitter_id_hi = (device_id >> 8),
@@ -290,6 +291,11 @@ static void on_capability_get(const struct nrf_modem_dect_phy_capability_get_eve
   else 
   {
     LOG_WRN("capability_get cb time %"PRIu64" status %x", modem_time, evt->err);
+    struct nrf_modem_dect_phy_capability *capa = evt->capability;
+    LOG_WRN("rx spatial streams: %d\n\
+            mcs max:             %d\n\
+            mu:                  %d\n\
+            beta:                %d\n", capa->variant[0].rx_spatial_streams, capa->variant[0].mcs_max, capa->variant[0].mu, capa->variant[0].mcs_max, capa->variant[0].beta);
   }
 	k_sem_give(&operation_sem);
 }
@@ -612,6 +618,22 @@ bool DectPhy_WiznetAlert(void) // TODO better way of doing this
 {
   return true;
 }
+
+
+static int cmd_bridge(const struct shell *shell, size_t argc, char **argv)
+{
+  if (strcmp(argv[1], "status") == 0)
+  {
+    shell_print(shell, "Dect Bridge status:");
+    // queues
+    // extern struct k_queue ethTxQueue; // TODO JON There comes a point where we dont free these things
+    // extern struct k_queue ethRxQueue;
+  }
+  return 0;
+}
+
+// #define SHELL_CMD_ARG_REGISTER(syntax, subcmd, help, handler, mandatory, optional)
+SHELL_CMD_ARG_REGISTER(bridge, NULL, "bridge <subcommand>", cmd_bridge, 2, 32);
 
 void DectPhy_Main(bool master)
 {	

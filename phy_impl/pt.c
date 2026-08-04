@@ -17,7 +17,7 @@ static void on_pdc_pt(const struct nrf_modem_dect_phy_pdc_event *evt) // TODO ma
   int err;
   switch(ptState)
   {
-    case PT_STATE_WAIT_FOR_BEACON: 
+    case PT_STATE_WAIT_FOR_BEACON: // BEACON RECEIVED
       {
         // We received data while waiting for the beacon. Check if it is a beacon. If so, kick off the current frame's states
         if (DectPhy_PktIsBeacon((char *) evt->data))
@@ -41,7 +41,7 @@ static void on_pdc_pt(const struct nrf_modem_dect_phy_pdc_event *evt) // TODO ma
         }
         break;
       }
-    case PT_STATE_SCHEDULED_DOWNLINK:
+    case PT_STATE_SCHEDULED_DOWNLINK: // DOWNLINK TX RECEIVED
       {
         err = DectPhy_TransmitHeadOfQueue(PT_TX_HANDLE, modem_time + 2 * opTransitionLatency);
         if (!DectPhy_PktIsNone(evt->data))
@@ -53,13 +53,15 @@ static void on_pdc_pt(const struct nrf_modem_dect_phy_pdc_event *evt) // TODO ma
           struct LeanWiznet_Packet *pkt = k_malloc(sizeof(struct LeanWiznet_Packet) + evt->len);
           if (pkt == NULL)
           {
-            LOG_ERR("%s:%d out of memory! cannot malloc", __FUNCTION__, __LINE__);
+            LOG_ERR("%s:%d out of memory! cannot malloc %d bytes", __FUNCTION__, __LINE__, evt->len + sizeof(struct LeanWiznet_Packet));
           }
-          memcpy(pkt->payload, evt->data, evt->len);
-          pkt->size = evt->len;
-          DectPhy_EnqueueEthTx(pkt);
+          else
+          {
+            memcpy(pkt->payload, evt->data, evt->len);
+            pkt->size = evt->len;
+            DectPhy_EnqueueEthTx(pkt);
+          }
         }
-        // err = transmit(pt_tx_handle, "TEST", 4, 0);
         slotCounter++;
         gpio_pin_toggle_dt(dlSwitch);
         ptState = PT_STATE_SCHEDULED_UPLINK;
@@ -90,7 +92,7 @@ static void on_op_complete_pt(const struct nrf_modem_dect_phy_op_complete_event 
   
   if (evt->handle == PT_TX_HANDLE) // Previous Uplink slot ended. schedule next downlink slot
   {
-    int err = DectPhy_Receive(PT_RX_HANDLE + slotCounter, 100 * DECT_SLOT_DURATION_TICK + 2 * opTransitionLatency, 0); // schedule next rx slot
+    int err = DectPhy_Receive(PT_RX_HANDLE + slotCounter, 100 * DECT_SLOT_DURATION_TICK + 2 * opTransitionLatency, 0); // schedule next rx slot // REACTIVE
     slotCounter++;
     ptState = (slotCounter < DECT_OPS_PER_BEACON) ? PT_STATE_SCHEDULED_DOWNLINK : PT_STATE_WAIT_FOR_BEACON;
     gpio_pin_toggle_dt(ulSwitch);
@@ -123,6 +125,10 @@ void Pt_HandleEvent(const struct nrf_modem_dect_phy_event *evt)
   else if (evt->id == NRF_MODEM_DECT_PHY_EVT_TIME)
   {
 		on_time_get_pt(&evt->time_get);
+  }
+  else
+  {
+    LOG_ERR("PT Unhandled event %d", evt->id);
   }
 }
 
