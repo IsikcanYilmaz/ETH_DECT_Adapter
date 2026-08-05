@@ -29,10 +29,8 @@ if [ "$(hostname)" == "jon-ThinkPad-T14-Gen-4" ]; then
   LOCAL_IP="$IP2"
   REMOTE_IP="$IP1"
   IFACENAME="enp1s0f0"
-  # LOCAL_MAC="74:5d:22:8d:74:0d"
-  # REMOTE_MAC="a0:ce:c8:1d:cb:ce"
   LOCAL_MAC="$THINKPAD_MAC"
-  REMOTE_MAC="$TOBIAS_MAC"
+  REMOTE_MAC="$OFFICE_MAC"
 elif [ "$(hostname)" == "agv" ]; then
   echo "[+] I am ROVER"
   LOCAL_IP="$ROVER_IP"
@@ -52,9 +50,7 @@ else
   LOCAL_IP="$IP1"
   REMOTE_IP="$IP2"
   IFACENAME="enxa0cec81dcbce"
-  # LOCAL_MAC="a0:ce:c8:1d:cb:ce"
-  # REMOTE_MAC="74:5d:22:8d:74:0d"
-  LOCAL_MAC="$TOBIAS_MAC"
+  LOCAL_MAC="$OFFICE_MAC"
   REMOTE_MAC="$THINKPAD_MAC"
 fi
 

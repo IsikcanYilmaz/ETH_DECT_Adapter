@@ -264,29 +264,30 @@ static struct LeanWiznet_Packet* w5500_rx(struct LeanWiznet_config *cfg, struct 
 
 	w5500_readbuf(cfg, off, header, 2); // From read pointer read 2 bytes
 	rx_len = sys_get_be16(header) - 2;
+  
+	read_len = rx_len;
+	reader = off + 2;
 
   struct LeanWiznet_Packet *buf = (struct LeanWiznet_Packet *) k_malloc(rx_len + sizeof(struct LeanWiznet_Packet));
 
   if (buf == NULL)
   {
-    LOG_ERR("%s k_malloc ran out of space", __FUNCTION__);
-    return NULL;
+    LOG_ERR("%s k_malloc ran out of space. %d + %d bytes", __FUNCTION__, rx_len, sizeof(struct LeanWiznet_Packet));
+    // w5500_command(cfg, S0_CR_RECV);
+    // k_mutex_unlock(&ctx->spi_mutex);
+    // return NULL;
   }
-  
-	read_len = rx_len;
-	reader = off + 2;
-
-  w5500_readbuf(cfg, reader, buf->payload, rx_len);
-
-  buf->size = rx_len;
-
-  LOG_DBG("Rx %d bytes", rx_len);
-  LOG_HEXDUMP_DBG(buf->payload, rx_len, "RX");
+  else 
+  {
+    w5500_readbuf(cfg, reader, buf->payload, rx_len);
+    buf->size = rx_len;
+    LOG_DBG("Rx %d bytes", rx_len);
+    LOG_HEXDUMP_DBG(buf->payload, rx_len, "RX");
+  }
 
 	sys_put_be16(off + 2 + rx_len, tmp);
 	w5500_spi_write(cfg, W5500_S0_RX_RD, tmp, 2);
 	w5500_command(cfg, S0_CR_RECV);
-
   k_mutex_unlock(&ctx->spi_mutex);
 
   return buf;
@@ -424,7 +425,7 @@ static void w5500_rx_thread(void *p1, void *p2, void *p3)
             }
             else
             {
-              LOG_ERR("Bad packet rx!");
+              LOG_DBG("Bad packet rx!");
             }
             LOG_DBG("RX Done");
           }
