@@ -119,6 +119,8 @@ extern const struct gpio_dt_spec *beaconRxSwitch;
 extern const struct gpio_dt_spec *dlSwitch;
 extern const struct gpio_dt_spec *ulSwitch;
 
+extern struct k_sem operation_sem;
+extern struct k_sem time_sem;
 
 void DectPhy_Main(bool iAmMaster);
 bool DectPhy_WiznetAlert(void); // TODO better way of doing this

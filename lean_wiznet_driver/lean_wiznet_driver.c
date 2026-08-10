@@ -211,7 +211,7 @@ static int w5500_tx(struct LeanWiznet_config *cfg, struct LeanWiznet_runtime *ct
   if (mutexret)
   {
     LOG_ERR("%s Couldnt acquire mutex", __FUNCTION__);
-    return NULL;
+    return -EBUSY;
   }
 
 	w5500_spi_read(cfg, W5500_S0_TX_WR, off, 2);
@@ -219,6 +219,7 @@ static int w5500_tx(struct LeanWiznet_config *cfg, struct LeanWiznet_runtime *ct
 
 	ret = w5500_writebuf(cfg, offset, buf, len);
 	if (ret < 0) {
+    k_mutex_unlock(&ctx->spi_mutex);
 		return ret;
 	}
 
@@ -227,6 +228,7 @@ static int w5500_tx(struct LeanWiznet_config *cfg, struct LeanWiznet_runtime *ct
 
 	w5500_command(cfg, S0_CR_SEND);
 	if (k_sem_take(&ctx->tx_sem, K_MSEC(10))) {
+    k_mutex_unlock(&ctx->spi_mutex);
 		return -EIO;
 	}
 
@@ -255,7 +257,9 @@ static struct LeanWiznet_Packet* w5500_rx(struct LeanWiznet_config *cfg, struct 
 	w5500_spi_read(cfg, W5500_S0_RX_RSR, tmp, 2); // Get Rx Received Size
 	rx_buf_len = sys_get_be16(tmp);
 
-	if (rx_buf_len == 0) {
+	if (rx_buf_len == 0) 
+  {
+    k_mutex_unlock(&ctx->spi_mutex);
 		return NULL;
 	}
 

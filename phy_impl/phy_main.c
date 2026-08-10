@@ -222,6 +222,11 @@ int DectPhy_TransmitHeadOfQueue(uint32_t handle, uint64_t start_time)
 {
   int err;
   struct DectInFlightPktStub_s *inFlight = k_malloc(sizeof(struct DectInFlightPktStub_s));
+  if (inFlight == NULL)
+  {
+    LOG_ERR("%s: oom cannot malloc", __FUNCTION__);
+    return -ENOMEM;
+  }
   inFlight->handle = handle;
   if (!k_queue_is_empty(&ethRxQueue))
   {
@@ -236,6 +241,17 @@ int DectPhy_TransmitHeadOfQueue(uint32_t handle, uint64_t start_time)
     err = DectPhy_Transmit(handle, "NONE", 4, start_time);
     inFlight->ptr = NULL;
   }
+
+  if (err)
+  {
+    LOG_ERR("%s: transmission error");
+    if (inFlight->ptr)
+    {
+      k_free(inFlight->ptr);
+    }
+    k_free(inFlight);
+  }
+
   k_queue_append(&inFlightQueue, inFlight);
   return err;
 }
@@ -295,7 +311,8 @@ static void on_capability_get(const struct nrf_modem_dect_phy_capability_get_eve
     LOG_WRN("rx spatial streams: %d\n\
             mcs max:             %d\n\
             mu:                  %d\n\
-            beta:                %d\n", capa->variant[0].rx_spatial_streams, capa->variant[0].mcs_max, capa->variant[0].mu, capa->variant[0].mcs_max, capa->variant[0].beta);
+            beta:                %d\n", 
+            capa->variant[0].rx_spatial_streams, capa->variant[0].mcs_max, capa->variant[0].mu, capa->variant[0].mcs_max);
   }
 	k_sem_give(&operation_sem);
 }
@@ -600,6 +617,8 @@ int DectPhy_Init(void)
   hwinfo_get_device_id((void *)&device_id, sizeof(device_id));
 	
   LOG_INF("Dect NR+ PHY initialized, device ID: %d", device_id);
+
+  return 0;
 }
 
 static void test_point_thread(void)

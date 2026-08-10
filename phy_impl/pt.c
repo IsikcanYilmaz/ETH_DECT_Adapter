@@ -9,9 +9,6 @@
 
 LOG_MODULE_REGISTER(dect_phy_pt, LOG_LEVEL_WRN);
 
-extern struct k_sem *operation_sem;
-extern struct k_sem *time_sem;
-
 static void on_pdc_pt(const struct nrf_modem_dect_phy_pdc_event *evt) // TODO make this part as lean as possible. just copy over the bytes and let a thread do processing
 {
   int err;

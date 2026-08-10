@@ -9,9 +9,6 @@
 
 LOG_MODULE_REGISTER(dect_phy_ft, LOG_LEVEL_WRN);
 
-extern struct k_sem *operation_sem;
-extern struct k_sem *time_sem;
-
 static void on_pdc_ft(const struct nrf_modem_dect_phy_pdc_event *evt) // TODO make this part as lean as possible. just copy over the bytes and let a thread do processing
 {
   // LOG_HEXDUMP_WRN(evt->data, evt->len, "RX");
@@ -23,9 +20,17 @@ static void on_pdc_ft(const struct nrf_modem_dect_phy_pdc_event *evt) // TODO ma
     
     // We got a packet from the DECT connection. Enqueue it to wiznet's tx queue
     struct LeanWiznet_Packet *pkt = k_malloc(sizeof(struct LeanWiznet_Packet) + evt->len);
-    memcpy(pkt->payload, evt->data, evt->len);
-    pkt->size = evt->len;
-    DectPhy_EnqueueEthTx(pkt);
+
+    if (pkt == NULL)
+    {
+      LOG_ERR("%s: oom, cannot malloc", __FUNCTION__);
+    }
+    else
+    {
+      memcpy(pkt->payload, evt->data, evt->len);
+      pkt->size = evt->len;
+      DectPhy_EnqueueEthTx(pkt);
+    }
   }
   // k_sem_give(&rx_done_sem);
 }
