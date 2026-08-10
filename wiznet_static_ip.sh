@@ -31,6 +31,7 @@ if [ "$(hostname)" == "jon-ThinkPad-T14-Gen-4" ]; then
   IFACENAME="enp1s0f0"
   LOCAL_MAC="$THINKPAD_MAC"
   REMOTE_MAC="$OFFICE_MAC"
+  # REMOTE_MAC="$TOBIAS_MAC"
 elif [ "$(hostname)" == "agv" ]; then
   echo "[+] I am ROVER"
   LOCAL_IP="$ROVER_IP"
@@ -39,7 +40,7 @@ elif [ "$(hostname)" == "agv" ]; then
   LOCAL_MAC="$ROVER_MAC"
   REMOTE_MAC="$FLEET_MANAGER_MAC"
 elif [ "$(hostname)" == "agv-fleet-manager" ]; then
-  ehco "[+] I am FLEET MANAGER"
+  echo "[+] I am FLEET MANAGER"
   LOCAL_IP="10.42.0.1"
   REMOTE_IP="$ROVER_IP"
   IFACENAME="$FLEET_MANAGER_IFACE_NAME"
