@@ -45,6 +45,14 @@ uint32_t rx_idleToActiveLatency;
 volatile enum DectPtState_e ptState = PT_STATE_WAIT_FOR_BEACON;
 volatile enum DectFtState_e ftState = FT_STATE_IDLE;
 
+int mcs_max = -1;
+
+// KNOBS
+DectKnobs_t knobs = {
+  .mcs = CONFIG_APP_MCS,
+  .ops_per_beacon = DECT_OPS_PER_BEACON,
+};
+
 inline uint64_t us_to_modem_ticks(uint64_t us)
 {
   return (((uint64_t) us / 1000) * NRF_MODEM_DECT_MODEM_TIME_TICK_RATE_KHZ);
@@ -141,7 +149,7 @@ int DectPhy_Transmit(uint32_t handle, void *data, size_t data_len, uint64_t star
     .transmitter_id_lo = (device_id & 0xff),
     .transmit_power = CONFIG_APP_TX_POWER,
     .reserved = 0,
-    .df_mcs = CONFIG_APP_MCS,
+    .df_mcs = knobs.mcs,
   };
 
   struct nrf_modem_dect_phy_tx_params tx_op_params = {
@@ -310,9 +318,12 @@ static void on_capability_get(const struct nrf_modem_dect_phy_capability_get_eve
     struct nrf_modem_dect_phy_capability *capa = evt->capability;
     LOG_WRN("rx spatial streams: %d\n\
             mcs max:             %d\n\
+            current mcs:         %d\n\
             mu:                  %d\n\
             beta:                %d\n", 
-            capa->variant[0].rx_spatial_streams, capa->variant[0].mcs_max, capa->variant[0].mu, capa->variant[0].mcs_max);
+            capa->variant[0].rx_spatial_streams, capa->variant[0].mcs_max, knobs.mcs, capa->variant[0].mu, capa->variant[0].mcs_max);
+
+    mcs_max = capa->variant[0].mcs_max;
   }
 	k_sem_give(&operation_sem);
 }
@@ -353,7 +364,7 @@ static void on_op_complete_ft(const struct nrf_modem_dect_phy_op_complete_event 
     if (evt->err == 0)
     {
       gpio_pin_toggle_dt(dlSwitch);
-      if (slotCounter < DECT_OPS_PER_BEACON)
+      if (slotCounter < knobs.ops_per_beacon)
       {
         err = DectPhy_Receive(FT_RX_HANDLE + slotCounter, 2 * DECT_SLOT_DURATION_TICK + (2 * opTransitionLatency), modem_time + (2 * opTransitionLatency));
         if (err)
@@ -386,7 +397,7 @@ static void on_op_complete_ft(const struct nrf_modem_dect_phy_op_complete_event 
     if (evt->err == 0)
     {
       gpio_pin_toggle_dt(ulSwitch);
-      if (slotCounter < DECT_OPS_PER_BEACON)
+      if (slotCounter < knobs.ops_per_beacon)
       {
         // err = transmit(ft_tx_handle + slotCounter, "TEST", 4, modem_time + (1) * (2 * opTransitionLatency));
         err = DectPhy_TransmitHeadOfQueue(FT_TX_HANDLE + slotCounter, modem_time + (1) * (2 * opTransitionLatency));
@@ -648,10 +659,25 @@ static int cmd_bridge(const struct shell *shell, size_t argc, char **argv)
     // extern struct k_queue ethTxQueue; // TODO JON There comes a point where we dont free these things
     // extern struct k_queue ethRxQueue;
   }
+  if (strncmp(argv[1], "mcs", 3) == 0)
+  {
+    if (argc == 2)
+    {
+      shell_print(shell, "Current mcs: %d", knobs.mcs);
+    }
+    else if (argc >= 3)
+    {
+      uint32_t new_mcs = atoi(argv[2]);
+      if (new_mcs >= 0 && new_mcs <= mcs_max)
+      {
+        knobs.mcs = new_mcs;
+        shell_print(shell, "Current mcs: %d", knobs.mcs);
+      }
+    }
+  }
   return 0;
 }
 
-// #define SHELL_CMD_ARG_REGISTER(syntax, subcmd, help, handler, mandatory, optional)
 SHELL_CMD_ARG_REGISTER(bridge, NULL, "bridge <subcommand>", cmd_bridge, 2, 32);
 
 void DectPhy_Main(bool master)

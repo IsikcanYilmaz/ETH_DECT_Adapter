@@ -61,7 +61,7 @@ static void on_op_complete_ft(const struct nrf_modem_dect_phy_op_complete_event 
   {
     if (evt->err == 0)
     {
-      if (slotCounter < DECT_OPS_PER_BEACON)
+      if (slotCounter < knobs.ops_per_beacon)
       {
         err = DectPhy_Receive(FT_RX_HANDLE + slotCounter, 2 * DECT_SLOT_DURATION_TICK + (2 * opTransitionLatency), modem_time + (2 * opTransitionLatency));
         if (err)
@@ -81,7 +81,7 @@ static void on_op_complete_ft(const struct nrf_modem_dect_phy_op_complete_event 
     if (evt->err == 0)
     {
       gpio_pin_toggle_dt(ulSwitch);
-      if (slotCounter < DECT_OPS_PER_BEACON)
+      if (slotCounter < knobs.ops_per_beacon)
       {
         err = DectPhy_TransmitHeadOfQueue(FT_TX_HANDLE + slotCounter, modem_time + (1) * (2 * opTransitionLatency));
         if (err)
@@ -168,8 +168,10 @@ void Ft_InfiniteLoop(void)
       // time_get() -> schedule beacon -> schedule DL -> UL -> ....
       // However it doesnt have to be this way. When you have time make this better, 
       // i.e. if an error happens, simply keep in the loop, dont break out.
-      LOG_ERR("FT LOOP RESTARTING"); 
-      nrf_modem_dect_phy_time_get(); 
+      // LOG_ERR("FT LOOP RESTARTING"); 
+      // nrf_modem_dect_phy_time_get(); 
+      
+      k_sleep(K_MSEC(1000));
     }
   }
 }

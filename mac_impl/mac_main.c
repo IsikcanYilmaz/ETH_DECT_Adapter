@@ -689,7 +689,7 @@ static void process_dlc_rx_event(const struct app_event *evt)
   // JON DECT RX HAPPENS HERE
   LOG_INF("Received %d bytes from rd=%u: %s\n", evt->dlc_rx.len, long_rd_id, text);
   LOG_HEXDUMP_INF(text, evt->dlc_rx.len, "process_dlc_rx_event");
-  struct LeanWiznet_packet *pkt = k_malloc(evt->dlc_rx.len + sizeof(struct LeanWiznet_packet)); // JON TODO MAGIC NUMBER
+  struct LeanWiznet_Packet *pkt = k_malloc(evt->dlc_rx.len + sizeof(struct LeanWiznet_Packet)); // JON TODO MAGIC NUMBER
   pkt->size = evt->dlc_rx.len;
   memcpy(pkt->payload, text, pkt->size);
   k_queue_append(&ethTxQueue, pkt);
@@ -809,7 +809,7 @@ static void process_dect_handle_tx(const struct app_event *evt)
     return;
   }
 
-  struct LeanWiznet_packet *pkt = (struct LeanWiznet_packet *) k_queue_get(&ethRxQueue, K_FOREVER);
+  struct LeanWiznet_Packet *pkt = (struct LeanWiznet_Packet *) k_queue_get(&ethRxQueue, K_FOREVER);
   dect_send(current_mode, pkt->payload, pkt->size);
   k_free(pkt);
 }

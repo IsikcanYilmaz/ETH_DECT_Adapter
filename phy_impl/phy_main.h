@@ -38,6 +38,12 @@ typedef struct DectTimesyncMessage_s
   
 } DectTimesyncMessage_t;
 
+typedef struct DectKnobs_s
+{
+  uint32_t mcs;
+  uint16_t ops_per_beacon;
+} DectKnobs_t;
+
 enum DectPtState_e
 {
   PT_STATE_WAIT_FOR_BEACON,
@@ -121,6 +127,8 @@ extern const struct gpio_dt_spec *ulSwitch;
 
 extern struct k_sem operation_sem;
 extern struct k_sem time_sem;
+
+extern DectKnobs_t knobs;
 
 void DectPhy_Main(bool iAmMaster);
 bool DectPhy_WiznetAlert(void); // TODO better way of doing this

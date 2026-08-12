@@ -91,7 +91,16 @@ static void on_op_complete_pt(const struct nrf_modem_dect_phy_op_complete_event 
   {
     int err = DectPhy_Receive(PT_RX_HANDLE + slotCounter, 100 * DECT_SLOT_DURATION_TICK + 2 * opTransitionLatency, 0); // schedule next rx slot // REACTIVE
     slotCounter++;
-    ptState = (slotCounter < DECT_OPS_PER_BEACON) ? PT_STATE_SCHEDULED_DOWNLINK : PT_STATE_WAIT_FOR_BEACON;
+
+    if (slotCounter < knobs.ops_per_beacon)
+    {
+      ptState = PT_STATE_SCHEDULED_DOWNLINK;
+    }
+    else 
+    {
+      ptState = PT_STATE_WAIT_FOR_BEACON;
+    }
+
     gpio_pin_toggle_dt(ulSwitch);
     DectPhy_InFlightCompleted();
   }
