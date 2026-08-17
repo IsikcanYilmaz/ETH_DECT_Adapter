@@ -171,12 +171,14 @@ uint64_t ulSchedule;
 uint64_t ulScheduleOffset;
 uint64_t ulExpEnding;
 
+uint64_t nextDlTxModemTick;
+uint64_t nextUlRxModemTick;
 
 static void mock_complete(const struct nrf_modem_dect_phy_op_complete_event *evt)
 {
   int err;
 
-  static int testctr = 4;
+  static int testctr = 200;
 
   if (evt->err)
   {
@@ -188,39 +190,43 @@ static void mock_complete(const struct nrf_modem_dect_phy_op_complete_event *evt
   {
     gpio_pin_toggle_dt(beaconTxSwitch);
     uint64_t nextBeaconModemTick = modem_time + DECT_MASTER_BEACON_PERIOD_TICK;
-    // LOG_ERR("%s @ MT: %llu HANDLE BEACON (%lli)", __FUNCTION__, modem_time, beaconExpEnding - modem_time);
-    // err = DectPhy_TransmitBeacon(nextBeaconModemTick);
-    // testctr = 20;
+    err = DectPhy_TransmitBeacon(nextBeaconModemTick);
+
+    testctr = knobs.ops_per_beacon;
+
+    LOG_ERR("%s @ MT: %llu HANDLE BEACON (%lli)", __FUNCTION__, modem_time, beaconExpEnding - modem_time);
   }
   else if (IS_TX_HANDLE(evt->handle))
   {
     gpio_pin_toggle_dt(dlSwitch);
-    // uint64_t nextDlTxModemTick = modem_time + tx_idleToActiveLatency + DECT_SLOT_DURATION_TICK + tx_activeToIdleLatency;
-    // uint64_t nextDlTxModemTick = modem_time + tx_activeToIdleLatency + rx_idleToActiveLatency + DECT_SLOT_DURATION_TICK;
-    uint64_t nextDlTxModemTick = modem_time + dlScheduleOffset;
+    int64_t diff = modem_time - dlExpEnding;
+    nextDlTxModemTick = modem_time + dlScheduleOffset;
 
     if (testctr)
     {
       err = DectPhy_TransmitHeadOfQueue(FT_TX_HANDLE + testctr, nextDlTxModemTick);
       testctr--;
     }
-    // LOG_ERR("%s @ MT: %llu HANDLE DLTX (%lli). %llu - %llu", __FUNCTION__, modem_time, dlExpEnding - modem_time, nextDlTxModemTick, nextDlTxModemTick + DECT_SLOT_DURATION_TICK);
+
+    // LOG_ERR("%s @ MT: %llu HANDLE DLTX (%lli). %llu - %llu", __FUNCTION__, modem_time, modem_time - dlExpEnding, nextDlTxModemTick, nextDlTxModemTick + DECT_SLOT_DURATION_TICK);
+
+    dlExpEnding = nextDlTxModemTick + tx_idleToActiveLatency + DECT_SLOT_DURATION_TICK + DECT_GAP_TICK;
   }
   else if (IS_RX_HANDLE(evt->handle))
   {
     gpio_pin_toggle_dt(ulSwitch);
-    // uint64_t nextUlRxModemTick = modem_time + rx_idleToActiveLatency + DECT_SLOT_DURATION_TICK + rx_activeToIdleLatency + (2 * DECT_GAP_TICK);
-    // uint64_t nextUlRxModemTick = modem_time + rx_activeToIdleLatency + tx_idleToActiveLatency + DECT_SLOT_DURATION_TICK + (4 * DECT_GAP_TICK); 
-    uint64_t nextUlRxModemTick = modem_time + ulScheduleOffset;
+    int64_t diff = modem_time - ulExpEnding;
+    nextUlRxModemTick = modem_time + ulScheduleOffset;
 
     if (testctr) 
     {
       err = DectPhy_Receive(FT_RX_HANDLE + testctr, DECT_SLOT_DURATION_TICK, nextUlRxModemTick);
       testctr--;
     }
-    // LOG_ERR("%s @ MT: %llu HANDLE ULRX (%lli). %llu - %llu", __FUNCTION__, modem_time,  ulExpEnding - modem_time, nextUlRxModemTick, nextUlRxModemTick + DECT_SLOT_DURATION_TICK);
-  }
 
+    // LOG_ERR("%s @ MT: %llu HANDLE ULRX (%lli). %llu - %llu", __FUNCTION__, modem_time, diff, nextUlRxModemTick, nextUlRxModemTick + DECT_SLOT_DURATION_TICK);
+    ulExpEnding = nextUlRxModemTick + DECT_SLOT_DURATION_TICK + rx_activeToIdleLatency;
+  }
 }
 
 static void mock_time_get(const struct nrf_modem_dect_phy_time_get_event *evt)
@@ -233,13 +239,13 @@ static void mock_time_get(const struct nrf_modem_dect_phy_time_get_event *evt)
 
     beaconScheduleOffset = DECT_MASTER_BEACON_PERIOD_TICK;
     beaconSchedule = base;
-    beaconExpEnding = beaconSchedule + tx_idleToActiveLatency + DECT_SLOT_DURATION_TICK + DECT_GAP_TICK;
+    beaconExpEnding = beaconSchedule + tx_idleToActiveLatency + DECT_SLOT_DURATION_TICK + (10 * DECT_GAP_TICK);
 
-    dlScheduleOffset = tx_activeToIdleLatency + rx_idleToActiveLatency + DECT_SLOT_DURATION_TICK + rx_activeToIdleLatency + DECT_GAP_TICK;
+    dlScheduleOffset = tx_activeToIdleLatency + rx_idleToActiveLatency + DECT_SLOT_DURATION_TICK + rx_activeToIdleLatency + (10 * DECT_GAP_TICK);
     dlSchedule = beaconExpEnding + opTransitionLatency;
     dlExpEnding = dlSchedule + tx_idleToActiveLatency + DECT_SLOT_DURATION_TICK + DECT_GAP_TICK;
 
-    ulScheduleOffset = rx_activeToIdleLatency + tx_idleToActiveLatency + DECT_SLOT_DURATION_TICK + tx_activeToIdleLatency + DECT_GAP_TICK;
+    ulScheduleOffset = rx_activeToIdleLatency + tx_idleToActiveLatency + DECT_SLOT_DURATION_TICK + tx_activeToIdleLatency + (65 * DECT_GAP_TICK);
     ulSchedule = dlExpEnding + tx_activeToIdleLatency + rx_idleToActiveLatency;
     ulExpEnding = ulSchedule + DECT_SLOT_DURATION_TICK + rx_activeToIdleLatency;
 
