@@ -177,6 +177,7 @@ uint64_t nextUlRxModemTick;
 static void mock_complete(const struct nrf_modem_dect_phy_op_complete_event *evt)
 {
   int err;
+  int64_t diff;
 
   static int testctr = 200;
 
@@ -199,7 +200,7 @@ static void mock_complete(const struct nrf_modem_dect_phy_op_complete_event *evt
   else if (IS_TX_HANDLE(evt->handle))
   {
     gpio_pin_toggle_dt(dlSwitch);
-    int64_t diff = modem_time - dlExpEnding;
+    diff = modem_time - dlExpEnding;
     nextDlTxModemTick = modem_time + dlScheduleOffset;
 
     if (testctr)
@@ -215,7 +216,7 @@ static void mock_complete(const struct nrf_modem_dect_phy_op_complete_event *evt
   else if (IS_RX_HANDLE(evt->handle))
   {
     gpio_pin_toggle_dt(ulSwitch);
-    int64_t diff = modem_time - ulExpEnding;
+    diff = modem_time - ulExpEnding;
     nextUlRxModemTick = modem_time + ulScheduleOffset;
 
     if (testctr) 
