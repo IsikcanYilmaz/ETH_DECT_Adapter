@@ -13,11 +13,14 @@
 #define DECT_GAP_US (100) // ?
 #define DECT_GAP_TICK ((uint64_t) (DECT_GAP_US * NRF_MODEM_DECT_MODEM_TIME_TICK_RATE_KHZ) / 1000)
 
-// #define DECT_OPS_PER_BEACON 20 //164
-#define DECT_OPS_PER_BEACON 164
+// #define DECT_OPS_PER_BEACON 8 //164
+#define DECT_OPS_PER_BEACON 164 // working
 
 // #define DECT_MASTER_BEACON_PERIOD_TICK (10 * 24 * DECT_SLOT_DURATION_TICK) //(30 * 24 * DECT_SLOT_DURATION_TICK)
-#define DECT_MASTER_BEACON_PERIOD_TICK (30 * 24 * DECT_SLOT_DURATION_TICK)
+#define DECT_MASTER_BEACON_PERIOD_TICK (30 * 24 * DECT_SLOT_DURATION_TICK) // working
+
+// #define DECT_OPS_PER_BEACON 24
+// #define DECT_MASTER_BEACON_PERIOD_TICK (1 * 24 * DECT_SLOT_DURATION_TICK) 
 
 #define IS_RX_HANDLE(x) (x == BEACON_RX_HANDLE || (x >= FT_RX_HANDLE && x < PT_TX_HANDLE) || (x >= PT_RX_HANDLE && x < TEST_TX_HANDLE))
 #define IS_TX_HANDLE(x) (x == BEACON_TX_HANDLE || (x >= FT_TX_HANDLE && x < FT_RX_HANDLE) || (x >= PT_TX_HANDLE && x < PT_RX_HANDLE))
@@ -30,7 +33,7 @@ typedef struct DectPacket_s
 
 typedef struct DectBeaconMessage_s
 {
-   
+  
 } DectBeaconMessage_t;
 
 typedef struct DectTimesyncMessage_s
@@ -46,6 +49,7 @@ typedef struct DectKnobs_s
 
 enum DectPtState_e
 {
+  PT_STATE_IDLE,
   PT_STATE_WAIT_FOR_BEACON,
   PT_STATE_SCHEDULED_DOWNLINK,
   PT_STATE_SCHEDULED_UPLINK,
@@ -119,6 +123,7 @@ extern uint32_t opStartupLatency;
 extern uint32_t tx_idleToActiveLatency;
 extern uint32_t tx_activeToIdleLatency;
 extern uint32_t rx_idleToActiveLatency;
+extern uint32_t rx_activeToIdleLatency;
 
 extern const struct gpio_dt_spec *beaconTxSwitch;
 extern const struct gpio_dt_spec *beaconRxSwitch;
@@ -136,6 +141,7 @@ bool DectPhy_WiznetAlert(void); // TODO better way of doing this
 // Below should only be used by ft.c and pt.c // TODO maybe make these such that they are accessible thru a struct that only pt/ft can
 int DectPhy_Transmit(uint32_t handle, void *data, size_t data_len, uint64_t start_time);
 int DectPhy_Receive(uint32_t handle, uint32_t durationTicks, uint64_t start_time);
+int DectPhy_ReceiveContinuous(uint32_t handle, uint32_t durationTicks, uint64_t start_time); 
 int DectPhy_TransmitHeadOfQueue(uint32_t handle, uint64_t start_time);
 int DectPhy_TransmitBeacon(uint64_t start_time);
 

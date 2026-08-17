@@ -41,8 +41,9 @@ uint32_t opStartupLatency;
 uint32_t tx_idleToActiveLatency;
 uint32_t tx_activeToIdleLatency;
 uint32_t rx_idleToActiveLatency;
+uint32_t rx_activeToIdleLatency;
 
-volatile enum DectPtState_e ptState = PT_STATE_WAIT_FOR_BEACON;
+volatile enum DectPtState_e ptState = PT_STATE_IDLE;
 volatile enum DectFtState_e ftState = FT_STATE_IDLE;
 
 int mcs_max = -1;
@@ -174,6 +175,36 @@ int DectPhy_Transmit(uint32_t handle, void *data, size_t data_len, uint64_t star
 
 	return 0;
 }
+
+int DectPhy_ReceiveContinuous(uint32_t handle, uint32_t durationTicks, uint64_t start_time)
+{
+  int err;
+
+	struct nrf_modem_dect_phy_rx_params rx_op_params = {
+		.start_time = start_time,
+		.handle = handle,
+		.network_id = CONFIG_APP_NETWORK_ID,
+		.mode = NRF_MODEM_DECT_PHY_RX_MODE_CONTINUOUS,
+		.rssi_interval = NRF_MODEM_DECT_PHY_RSSI_INTERVAL_OFF,
+		.link_id = NRF_MODEM_DECT_PHY_LINK_UNSPECIFIED,
+		.rssi_level = -60,
+		.carrier = CONFIG_CARRIER,
+		.duration = durationTicks,
+		.filter.short_network_id = CONFIG_APP_NETWORK_ID & 0xff,
+		.filter.is_short_network_id_used = 1,
+		/* listen for everything (broadcast mode used) */
+		.filter.receiver_identity = 0,
+	};
+
+	err = nrf_modem_dect_phy_rx(&rx_op_params);
+	if (err != 0) 
+  {
+		return err;
+	}
+
+	return 0;
+}
+
 
 int DectPhy_Receive(uint32_t handle, uint32_t durationTicks, uint64_t start_time)
 {
@@ -339,102 +370,6 @@ static void on_pcc_crc_err(const struct nrf_modem_dect_phy_pcc_crc_failure_event
 	LOG_DBG("pcc_crc_err cb time %"PRIu64"", modem_time);
 }
 
-static void on_op_complete_ft(const struct nrf_modem_dect_phy_op_complete_event *evt)
-{
-  int err;
-  slotCounter++;
-
-  if (evt->handle == BEACON_TX_HANDLE)
-  {
-    if (evt->err == 0)
-    {
-      err = DectPhy_Transmit(BEACON_TX_HANDLE, "BEAC", 4, modem_time + DECT_MASTER_BEACON_PERIOD_TICK); // Next beacon
-      // err = transmit(ft_tx_handle, "TEST", 4, modem_time + (1) * (2 * opTransitionLatency));
-      err = DectPhy_TransmitHeadOfQueue(FT_TX_HANDLE, modem_time + (1) * (2 * opTransitionLatency));
-      slotCounter = 0;
-      gpio_pin_toggle_dt(beaconTxSwitch);
-      if (err)
-      {
-        LOG_ERR("Error scheduling tx %d", err);
-      }
-    }
-  }
-  else if (evt->handle >= FT_TX_HANDLE && evt->handle < FT_RX_HANDLE) // TX GOT DONE. SCHEDULE RX
-  {
-    if (evt->err == 0)
-    {
-      gpio_pin_toggle_dt(dlSwitch);
-      if (slotCounter < knobs.ops_per_beacon)
-      {
-        err = DectPhy_Receive(FT_RX_HANDLE + slotCounter, 2 * DECT_SLOT_DURATION_TICK + (2 * opTransitionLatency), modem_time + (2 * opTransitionLatency));
-        if (err)
-        {
-          LOG_ERR("Error scheduling rx %d", err);
-        }
-      }
-    }
-
-    // Tx just completed. Free the pointer of what just got tx'd. 
-    if (k_queue_is_empty(&inFlightQueue))
-    {
-      LOG_ERR("TX COMPLETE BUT IN FLIGHT QUEUE EMPTY!!!");
-    }
-    else
-    {
-      struct DectInFlightPktStub_s *pktToFree = k_queue_get(&inFlightQueue, K_FOREVER);
-      if (pktToFree)
-      {
-        if (pktToFree->ptr)
-          LOG_DBG("IN FLIGHT PKT FROM HANDLE %d DONE. 0x%08x. FREEING", pktToFree->handle, pktToFree->ptr);
-        k_free(pktToFree->ptr);
-        k_free(pktToFree);
-      }
-    }
-
-  }
-  else if (evt->handle >= FT_RX_HANDLE && evt->handle < PT_TX_HANDLE) // RX GOT DONE. SCHEDULE TX
-  {
-    if (evt->err == 0)
-    {
-      gpio_pin_toggle_dt(ulSwitch);
-      if (slotCounter < knobs.ops_per_beacon)
-      {
-        // err = transmit(ft_tx_handle + slotCounter, "TEST", 4, modem_time + (1) * (2 * opTransitionLatency));
-        err = DectPhy_TransmitHeadOfQueue(FT_TX_HANDLE + slotCounter, modem_time + (1) * (2 * opTransitionLatency));
-        if (err)
-        {
-          LOG_ERR("Error scheduling tx %d", err);
-        }
-      }
-    }
-  }
-
-  if (evt->err)
-  {
-    LOG_ERR("op_complete %s cb time %"PRIu64" status %x handle %d slotCounter %d", !is_rx_handle(evt->handle) ? "TX" : "RX", modem_time, evt->err, evt->handle, slotCounter);
-  }
-
-  k_sem_give(&operation_sem);
-}
-
-static void on_pdc_ft(const struct nrf_modem_dect_phy_pdc_event *evt) // TODO make this part as lean as possible. just copy over the bytes and let a thread do processing
-{
-  // LOG_HEXDUMP_WRN(evt->data, evt->len, "RX");
-  LOG_DBG("%s", __FUNCTION__);
-  if (!DectPhy_PktIsNone(evt->data))
-  {
-    LOG_DBG("%s %d handle, %d bytes", __FUNCTION__, evt->handle, evt->len);
-    LOG_HEXDUMP_DBG(evt->data, evt->len, "RX");
-    
-    // We got a packet from the DECT connection. Enqueue it to wiznet's tx queue
-    struct LeanWiznet_Packet *pkt = k_malloc(sizeof(struct LeanWiznet_Packet) + evt->len);
-    memcpy(pkt->payload, evt->data, evt->len);
-    pkt->size = evt->len;
-    k_queue_append(&ethTxQueue, pkt);
-  }
-  k_sem_give(&rx_done_sem);
-}
-
 static void on_pdc_crc_err(const struct nrf_modem_dect_phy_pdc_crc_failure_event *evt)
 {
 	LOG_DBG("pdc_crc_err cb time %"PRIu64"", modem_time);
@@ -451,6 +386,7 @@ static void on_latency_info_get(const struct nrf_modem_dect_phy_latency_info_eve
     tx_idleToActiveLatency = latencyInfo.operation.transmit.idle_to_active;
     tx_activeToIdleLatency = latencyInfo.operation.transmit.active_to_idle;
     rx_idleToActiveLatency = latencyInfo.operation.receive.idle_to_active;
+    rx_activeToIdleLatency = latencyInfo.operation.receive.active_to_idle_rx;
     LOG_WRN("Latency info: \n\
             slot_ticks:              %llu\n\
             gap_ticks:               %llu\n\
@@ -459,13 +395,14 @@ static void on_latency_info_get(const struct nrf_modem_dect_phy_latency_info_eve
             tx_idleToActiveLatency:  %d\n\
             tx_activeToIdleLatency:  %d\n\
             rx_idleToActiveLatency:  %d\n\
+            rx_activeToIdleLatency:  %d\n\
             current modem_time:      %llu\n\
             current uptime ticks:    %llu\n\
             modem ticks per ms:      %llu\n\
             host ticks per ms:       %llu\n", 
             DECT_SLOT_DURATION_TICK, 
             DECT_GAP_TICK, 
-            opTransitionLatency, opStartupLatency, tx_idleToActiveLatency, tx_activeToIdleLatency, rx_idleToActiveLatency,
+            opTransitionLatency, opStartupLatency, tx_idleToActiveLatency, tx_activeToIdleLatency, rx_idleToActiveLatency, rx_activeToIdleLatency,
             modem_time, k_uptime_ticks(), (uint64_t)(NRF_MODEM_DECT_MODEM_TIME_TICK_RATE_KHZ), (uint64_t) (CONFIG_SYS_CLOCK_TICKS_PER_SEC / 1000));
     
   }
@@ -503,12 +440,10 @@ static void dect_phy_event_handler(const struct nrf_modem_dect_phy_event *evt)
 	case NRF_MODEM_DECT_PHY_EVT_COMPLETED:
     if (iAmMaster)
     {
-      // on_op_complete_ft(&evt->op_complete);
       Ft_HandleEvent(evt);
     }
     else
     {
-      // on_op_complete_pt(&evt->op_complete);
       Pt_HandleEvent(evt);
     }
 		break;
@@ -519,7 +454,16 @@ static void dect_phy_event_handler(const struct nrf_modem_dect_phy_event *evt)
 		// on_rssi(&evt->rssi);
 		break;
 	case NRF_MODEM_DECT_PHY_EVT_PCC:
-		on_pcc(&evt->pcc);
+		// on_pcc(&evt->pcc);
+    lastPccModemTick = modem_time;
+    if (iAmMaster)
+    {
+      Ft_HandleEvent(evt);
+    }
+    else
+    {
+      Pt_HandleEvent(evt);
+    }
 		break;
 	case NRF_MODEM_DECT_PHY_EVT_PCC_ERROR:
 		on_pcc_crc_err(&evt->pcc_crc_err);
@@ -528,12 +472,10 @@ static void dect_phy_event_handler(const struct nrf_modem_dect_phy_event *evt)
     lastPdcModemTick = modem_time;
     if (iAmMaster)
     {
-		  // on_pdc_ft(&evt->pdc);
       Ft_HandleEvent(evt);
     }
     else 
     {
-		  // on_pdc_pt(&evt->pdc);
       Pt_HandleEvent(evt);
     }
 		break;
@@ -541,8 +483,14 @@ static void dect_phy_event_handler(const struct nrf_modem_dect_phy_event *evt)
 		on_pdc_crc_err(&evt->pdc_crc_err);
 		break;
 	case NRF_MODEM_DECT_PHY_EVT_TIME:
-    Ft_HandleEvent(evt);
-		// on_time_get(&evt->time_get);
+    if (iAmMaster)
+    {
+      Ft_HandleEvent(evt);
+    }
+    else 
+    {
+      Pt_HandleEvent(evt);
+    }
 		break;
 	case NRF_MODEM_DECT_PHY_EVT_CAPABILITY:
 		on_capability_get(&evt->capability_get);
