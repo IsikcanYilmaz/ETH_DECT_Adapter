@@ -174,12 +174,12 @@ uint64_t ulExpEnding;
 uint64_t nextDlTxModemTick;
 uint64_t nextUlRxModemTick;
 
+volatile int testctr = DECT_OPS_PER_BEACON;
+
 static void mock_complete(const struct nrf_modem_dect_phy_op_complete_event *evt)
 {
   int err;
   int64_t diff;
-
-  static int testctr = 200;
 
   if (evt->err)
   {
@@ -190,23 +190,41 @@ static void mock_complete(const struct nrf_modem_dect_phy_op_complete_event *evt
   if (evt->handle == BEACON_TX_HANDLE)
   {
     gpio_pin_toggle_dt(beaconTxSwitch);
-    uint64_t nextBeaconModemTick = modem_time + DECT_MASTER_BEACON_PERIOD_TICK;
-    err = DectPhy_TransmitBeacon(nextBeaconModemTick);
 
-    testctr = knobs.ops_per_beacon;
-
-    LOG_ERR("%s @ MT: %llu HANDLE BEACON (%lli)", __FUNCTION__, modem_time, beaconExpEnding - modem_time);
+    testctr = DECT_OPS_PER_BEACON;
+    LOG_WRN("%s @ MT: %llu HANDLE BEACON (%lli)", __FUNCTION__, modem_time, beaconExpEnding - modem_time);
   }
   else if (IS_TX_HANDLE(evt->handle))
   {
     gpio_pin_toggle_dt(dlSwitch);
-    diff = modem_time - dlExpEnding;
+    // diff = modem_time - dlExpEnding;
     nextDlTxModemTick = modem_time + dlScheduleOffset;
 
     if (testctr)
     {
       err = DectPhy_TransmitHeadOfQueue(FT_TX_HANDLE + testctr, nextDlTxModemTick);
       testctr--;
+    } 
+
+    static int twice = 1;
+    if (testctr == 0 && twice)
+    {
+      // twice--;
+      //
+      beaconSchedule = nextDlTxModemTick + 5000 * DECT_GAP_TICK;
+      beaconExpEnding = beaconSchedule + tx_idleToActiveLatency + DECT_SLOT_DURATION_TICK + (10 * DECT_GAP_TICK);
+      //
+      dlSchedule = beaconExpEnding + opTransitionLatency;
+      dlExpEnding = dlSchedule + tx_idleToActiveLatency + DECT_SLOT_DURATION_TICK + DECT_GAP_TICK;
+      //
+      // ulSchedule = dlExpEnding + tx_activeToIdleLatency + rx_idleToActiveLatency;
+
+      err = DectPhy_TransmitBeacon(beaconSchedule);
+      // err = DectPhy_TransmitHeadOfQueue(FT_TX_HANDLE + testctr, dlSchedule);
+      // err = DectPhy_Receive(FT_RX_HANDLE + testctr - 1, DECT_SLOT_DURATION_TICK, ulSchedule);
+      // testctr -= 2;
+      
+      // testctr = 0;
     }
 
     // LOG_ERR("%s @ MT: %llu HANDLE DLTX (%lli). %llu - %llu", __FUNCTION__, modem_time, modem_time - dlExpEnding, nextDlTxModemTick, nextDlTxModemTick + DECT_SLOT_DURATION_TICK);
@@ -216,8 +234,8 @@ static void mock_complete(const struct nrf_modem_dect_phy_op_complete_event *evt
   else if (IS_RX_HANDLE(evt->handle))
   {
     gpio_pin_toggle_dt(ulSwitch);
-    diff = modem_time - ulExpEnding;
-    nextUlRxModemTick = modem_time + ulScheduleOffset;
+    // diff = modem_time - ulExpEnding;
+    nextUlRxModemTick = (testctr == 1) ? dlExpEnding + ulScheduleOffset : modem_time + ulScheduleOffset;
 
     if (testctr) 
     {
@@ -225,8 +243,10 @@ static void mock_complete(const struct nrf_modem_dect_phy_op_complete_event *evt
       testctr--;
     }
 
+    LOG_WRN("RX DONE %d", evt->handle);
+
     // LOG_ERR("%s @ MT: %llu HANDLE ULRX (%lli). %llu - %llu", __FUNCTION__, modem_time, diff, nextUlRxModemTick, nextUlRxModemTick + DECT_SLOT_DURATION_TICK);
-    ulExpEnding = nextUlRxModemTick + DECT_SLOT_DURATION_TICK + rx_activeToIdleLatency;
+    // ulExpEnding = nextUlRxModemTick + DECT_SLOT_DURATION_TICK + rx_activeToIdleLatency;
   }
 }
 
@@ -238,7 +258,7 @@ static void mock_time_get(const struct nrf_modem_dect_phy_time_get_event *evt)
     
     base = modem_time + 50 * DECT_SLOT_DURATION_TICK;
 
-    beaconScheduleOffset = DECT_MASTER_BEACON_PERIOD_TICK;
+    beaconScheduleOffset = DECT_MASTER_BEACON_PERIOD_TICK; // - (24 * DECT_GAP_TICK);
     beaconSchedule = base;
     beaconExpEnding = beaconSchedule + tx_idleToActiveLatency + DECT_SLOT_DURATION_TICK + (10 * DECT_GAP_TICK);
 
@@ -251,8 +271,9 @@ static void mock_time_get(const struct nrf_modem_dect_phy_time_get_event *evt)
     ulExpEnding = ulSchedule + DECT_SLOT_DURATION_TICK + rx_activeToIdleLatency;
 
     err = DectPhy_TransmitBeacon(base);
-    err = DectPhy_TransmitHeadOfQueue(FT_TX_HANDLE, dlSchedule);
-    err = DectPhy_Receive(FT_RX_HANDLE, DECT_SLOT_DURATION_TICK, ulSchedule);
+    err = DectPhy_TransmitHeadOfQueue(FT_TX_HANDLE + testctr, dlSchedule);
+    err = DectPhy_Receive(FT_RX_HANDLE + testctr - 1, DECT_SLOT_DURATION_TICK, ulSchedule);
+    testctr -= 2;
 
     // ftState = FT_STATE_SCHEDULED_BEACON;
     ftState = FT_STATE_SCHEDULED_DOWNLINK;
