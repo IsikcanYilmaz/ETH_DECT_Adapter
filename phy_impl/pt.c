@@ -147,27 +147,27 @@ static void mock_pcc(const struct nrf_modem_dect_phy_pcc_event *evt)
 static char test[4];
 static void mock_pdc(const struct nrf_modem_dect_phy_pdc_event *evt) // TODO make this part as lean as possible. just copy over the bytes and let a thread do processing
 {
-  if (ptState == PT_STATE_WAIT_FOR_BEACON)
+  int err;
+  // LOG_WRN("DATA %s @ %llu", evt->data, modem_time);
+  if (ptState == PT_STATE_WAIT_FOR_BEACON) 
   {
-    int err;
-    if (DectPhy_PktIsBeacon(evt->data))
+    if (DectPhy_PktIsBeacon(evt->data)) 
     {
-      err = DectPhy_Receive(PT_RX_HANDLE + slotCounter, DECT_SLOT_DURATION_TICK + 2 * opTransitionLatency, 0); 
-      gpio_pin_toggle_dt(beaconRxSwitch); // GOT BEACON FLIP THE GPIO 
-      // LOG_ERR("PDC %s", evt->data);
+      err = DectPhy_Receive(PT_RX_HANDLE, US_TO_MODEM_TICKS(10000000), 0); // GET FAKE BEACON
+      LOG_WRN("BEACON RECEIVED @ %llu", modem_time);
       ptState = PT_STATE_SCHEDULED_DOWNLINK;
     }
-    else 
+    else
     {
       err = DectPhy_Receive(BEACON_RX_HANDLE, US_TO_MODEM_TICKS(10000000), 0); // GET FAKE BEACON
-      LOG_ERR("NON BEACON RECEIVED WHILE WAITING FOR BEACON %s", evt->data);
     }
   }
-  else if (ptState == PT_STATE_SCHEDULED_DOWNLINK)
+
+  if (ptState == PT_STATE_SCHEDULED_DOWNLINK)
   {
-    gpio_pin_toggle_dt(dlSwitch);
-    memcpy(test, evt->data, 4);
+    err = DectPhy_TransmitHeadOfQueue(PT_TX_HANDLE, 0);
     ptState = PT_STATE_SCHEDULED_UPLINK;
+    LOG_WRN("DOWNLINK %s", evt->data);
   }
 }
 
@@ -177,15 +177,13 @@ static void mock_complete(const struct nrf_modem_dect_phy_op_complete_event *evt
   {
     LOG_ERR("op_complete %s cb time %"PRIu64" status %x handle %d ", !IS_RX_HANDLE(evt->handle) ? "TX" : "RX", modem_time, evt->err, evt->handle);
   }
-  else
+
+  if (ptState == PT_STATE_SCHEDULED_DOWNLINK)
   {
-    if (IS_TX_HANDLE(evt->handle) && ptState == PT_STATE_SCHEDULED_UPLINK)
-    {
-      gpio_pin_toggle_dt(ulSwitch); // UPLINK DONE FLIUP THE GPIO
-      LOG_ERR("PT UL TX COMPLETE");
-    }
-    // LOG_ERR("EVT CMP @ MT %llu handle %d", modem_time, evt->handle); // TODO REMOVE 
+    LOG_WRN("UPLINK COMPLETE");
   }
+
+  // k_sem_give(&operation_sem);
 }
 
 // Currently we care for two kinds of events:
@@ -236,11 +234,13 @@ void Pt_InfiniteLoop(void)
     }
 
     ptState = PT_STATE_WAIT_FOR_BEACON;
-
+    
     int err = 0;
+
+    LOG_ERR("PT LOOP BEGIN");
+
     err = DectPhy_Receive(BEACON_RX_HANDLE, US_TO_MODEM_TICKS(10000000), 0); // GET FAKE BEACON
-    LOG_ERR("PT LOOP BEGIN %d", err);
-    // k_sem_take(&operation_sem, K_FOREVER);
+    k_sem_take(&operation_sem, K_FOREVER);
 
     // if (ptState == PT_STATE_WAIT_FOR_BEACON)
     // {
@@ -259,9 +259,9 @@ void Pt_InfiniteLoop(void)
     
     while(true) // goodnight sweet prince
     {
-      k_sleep(K_MSEC(100));
-      LOG_ERR("DONE %s", test);
-      err = DectPhy_TransmitHeadOfQueue(PT_TX_HANDLE + slotCounter, 0); 
+      k_sleep(K_MSEC(1000));
+      LOG_ERR("DONE");
+      // err = DectPhy_TransmitHeadOfQueue(PT_TX_HANDLE + slotCounter, 0); 
     }
   }
 }

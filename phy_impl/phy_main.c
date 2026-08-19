@@ -205,7 +205,6 @@ int DectPhy_ReceiveContinuous(uint32_t handle, uint32_t durationTicks, uint64_t 
 	return 0;
 }
 
-
 int DectPhy_Receive(uint32_t handle, uint32_t durationTicks, uint64_t start_time)
 {
   int err;
@@ -257,6 +256,65 @@ void DectPhy_InFlightCompleted(void)
   }
 }
 
+int DectPhy_TransmitHeadOfQueueAndReceive(uint32_t handle_offset, uint64_t start_time_tx, uint64_t start_time_rx, uint32_t rx_duration)
+{
+  int err;
+  
+  // Prep our payload
+  // struct DectInFlightPktStub_s *inFlight = k_malloc(sizeof(struct DectInFlightPktStub_s));
+  // if (inFlight == NULL)
+  // {
+  //   LOG_ERR("%s: oom cannot malloc", __FUNCTION__);
+  //   return -ENOMEM;
+  // }
+  // inFlight->handle = handle;
+  
+  struct phy_ctrl_field_common header = {
+    .header_format = 0x0,
+    .packet_length_type = DECT_PACKET_LENGTH_SLOT,
+    .packet_length = 0x01,
+    .short_network_id = (CONFIG_APP_NETWORK_ID & 0xff),
+    .transmitter_id_hi = (device_id >> 8),
+    .transmitter_id_lo = (device_id & 0xff),
+    .transmit_power = CONFIG_APP_TX_POWER,
+    .reserved = 0,
+    .df_mcs = knobs.mcs,
+  };
+
+  struct nrf_modem_dect_phy_tx_rx_params tx_rx_op_params = {
+    .tx = {
+      .start_time = start_time_tx,
+      .handle = TX_COMBO_HANDLE + handle_offset,
+      .network_id = CONFIG_APP_NETWORK_ID,
+      .phy_type = 0,
+      .lbt_rssi_threshold_max = 0,
+      .carrier = CONFIG_CARRIER,
+      .lbt_period = 0,// NRF_MODEM_DECT_LBT_PERIOD_MAX, // JON EXPERIMENTAL
+      .phy_header = (union nrf_modem_dect_phy_hdr *) &header,
+      .data = "NONE", // TODO pull this from the head of queue
+      .data_size = 4,
+    },
+    .rx = {
+      .start_time = start_time_rx,
+      .handle = RX_COMBO_HANDLE + handle_offset,
+      .network_id = CONFIG_APP_NETWORK_ID,
+      .mode = NRF_MODEM_DECT_PHY_RX_MODE_SINGLE_SHOT,
+      .rssi_interval = NRF_MODEM_DECT_PHY_RSSI_INTERVAL_OFF,
+      .link_id = NRF_MODEM_DECT_PHY_LINK_UNSPECIFIED,
+      .rssi_level = -60,
+      .carrier = CONFIG_CARRIER,
+      .duration = rx_duration,
+      .filter.short_network_id = CONFIG_APP_NETWORK_ID & 0xff,
+      .filter.is_short_network_id_used = 1,
+      /* listen for everything (broadcast mode used) */
+      .filter.receiver_identity = 0,
+    }
+  };
+
+  err = nrf_modem_dect_phy_tx_rx(&tx_rx_op_params);
+  return err;
+}
+
 int DectPhy_TransmitHeadOfQueue(uint32_t handle, uint64_t start_time)
 {
   int err;
@@ -291,7 +349,10 @@ int DectPhy_TransmitHeadOfQueue(uint32_t handle, uint64_t start_time)
     k_free(inFlight);
   }
 
-  k_queue_append(&inFlightQueue, inFlight);
+  else 
+  {
+    k_queue_append(&inFlightQueue, inFlight);
+  }
   return err;
 }
 

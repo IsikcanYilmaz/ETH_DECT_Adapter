@@ -15,7 +15,7 @@
 #define DECT_GAP_TICK ((uint64_t) (DECT_GAP_US * NRF_MODEM_DECT_MODEM_TIME_TICK_RATE_KHZ) / 1000)
 
 // #define DECT_OPS_PER_BEACON 8 //164
-#define DECT_OPS_PER_BEACON 20 // working
+#define DECT_OPS_PER_BEACON 10 //164 // working
 
 // #define DECT_MASTER_BEACON_PERIOD_TICK (10 * 24 * DECT_SLOT_DURATION_TICK) //(30 * 24 * DECT_SLOT_DURATION_TICK)
 #define DECT_MASTER_BEACON_PERIOD_TICK (20 * 24 * DECT_SLOT_DURATION_TICK) // working
@@ -23,8 +23,9 @@
 // #define DECT_OPS_PER_BEACON 24
 // #define DECT_MASTER_BEACON_PERIOD_TICK (1 * 24 * DECT_SLOT_DURATION_TICK) 
 
-#define IS_RX_HANDLE(x) (x == BEACON_RX_HANDLE || (x >= FT_RX_HANDLE && x < PT_TX_HANDLE) || (x >= PT_RX_HANDLE && x < TEST_TX_HANDLE))
-#define IS_TX_HANDLE(x) (x == BEACON_TX_HANDLE || (x >= FT_TX_HANDLE && x < FT_RX_HANDLE) || (x >= PT_TX_HANDLE && x < PT_RX_HANDLE))
+#define IS_RX_HANDLE(x) (x == BEACON_RX_HANDLE || (x >= FT_RX_HANDLE && x < PT_TX_HANDLE) || (x >= PT_RX_HANDLE && x < TX_COMBO_HANDLE) || (x >= RX_COMBO_HANDLE && x < TEST_TX_HANDLE))
+#define IS_TX_HANDLE(x) (x == BEACON_TX_HANDLE || (x >= FT_TX_HANDLE && x < FT_RX_HANDLE) || (x >= PT_TX_HANDLE && x < PT_RX_HANDLE) || (x >= TX_COMBO_HANDLE && x < RX_COMBO_HANDLE))
+#define IS_COMBO_HANDLE(x) (x >= TX_COMBO_HANDLE && x < RX_COMBO_HANDLE)
 
 // TODO decide what to do with these
 typedef struct DectPacket_s
@@ -82,6 +83,8 @@ enum DectOperationHandle_e
   FT_RX_HANDLE = 3000,
   PT_TX_HANDLE = 4000,
   PT_RX_HANDLE = 5000,
+  TX_COMBO_HANDLE = 6000,
+  RX_COMBO_HANDLE = 7000, 
   TEST_TX_HANDLE = 9998,
   TEST_RX_HANDLE = 9999,
   MAX_HANDLE = 0xffff
@@ -144,6 +147,7 @@ int DectPhy_Transmit(uint32_t handle, void *data, size_t data_len, uint64_t star
 int DectPhy_Receive(uint32_t handle, uint32_t durationTicks, uint64_t start_time);
 int DectPhy_ReceiveContinuous(uint32_t handle, uint32_t durationTicks, uint64_t start_time); 
 int DectPhy_TransmitHeadOfQueue(uint32_t handle, uint64_t start_time);
+int DectPhy_TransmitHeadOfQueueAndReceive(uint32_t handle_offset, uint64_t start_time_tx, uint64_t start_time_rx, uint32_t rx_duration);
 int DectPhy_TransmitBeacon(uint64_t start_time);
 
 // Util
