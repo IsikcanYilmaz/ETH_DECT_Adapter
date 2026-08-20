@@ -14,8 +14,10 @@
 #define DECT_GAP_US (5) // ?
 #define DECT_GAP_TICK ((uint64_t) (DECT_GAP_US * NRF_MODEM_DECT_MODEM_TIME_TICK_RATE_KHZ) / 1000)
 
+#define DECT_GUARD_TIME (50 * DECT_GAP_TICK) // 5000 us
+
 // #define DECT_OPS_PER_BEACON 8 //164
-#define DECT_OPS_PER_BEACON 10 //164 // working
+#define DECT_OPS_PER_BEACON 4 //164 // working
 
 // #define DECT_MASTER_BEACON_PERIOD_TICK (10 * 24 * DECT_SLOT_DURATION_TICK) //(30 * 24 * DECT_SLOT_DURATION_TICK)
 #define DECT_MASTER_BEACON_PERIOD_TICK (20 * 24 * DECT_SLOT_DURATION_TICK) // working
@@ -27,6 +29,8 @@
 #define IS_TX_HANDLE(x) (x == BEACON_TX_HANDLE || (x >= FT_TX_HANDLE && x < FT_RX_HANDLE) || (x >= PT_TX_HANDLE && x < PT_RX_HANDLE) || (x >= TX_COMBO_HANDLE && x < RX_COMBO_HANDLE))
 #define IS_COMBO_HANDLE(x) (x >= TX_COMBO_HANDLE && x < RX_COMBO_HANDLE)
 
+#define DECT_BEACON_MAGIC_STRING ("BEAC")
+
 // TODO decide what to do with these
 typedef struct DectPacket_s
 {
@@ -35,8 +39,10 @@ typedef struct DectPacket_s
 
 typedef struct DectBeaconMessage_s
 {
-  
-} DectBeaconMessage_t;
+  char magic[4]; // 4
+  uint16_t ops_per_beacon; // 2
+  uint16_t guard_time; // 2
+} __attribute__((packed)) DectBeaconMessage_t;
 
 typedef struct DectTimesyncMessage_s
 {
@@ -87,6 +93,7 @@ enum DectOperationHandle_e
   RX_COMBO_HANDLE = 7000, 
   TEST_TX_HANDLE = 9998,
   TEST_RX_HANDLE = 9999,
+  GARBAGE_HANDLE = 10000,
   MAX_HANDLE = 0xffff
 };
 
@@ -118,6 +125,7 @@ extern uint64_t lastPccModemTick;
 extern uint64_t lastPdcModemTick;
 extern uint64_t lastBeaconModemTick;
 extern uint64_t lastLoopModemTick;
+extern uint64_t pccPdcDiff;
 
 extern uint32_t lastBeaconTs;
 
@@ -134,8 +142,12 @@ extern const struct gpio_dt_spec *beaconRxSwitch;
 extern const struct gpio_dt_spec *dlSwitch;
 extern const struct gpio_dt_spec *ulSwitch;
 
+extern const struct gpio_dt_spec *ptDlSwitch;
+extern const struct gpio_dt_spec *ptUlSwitch;
+
 extern struct k_sem operation_sem;
 extern struct k_sem time_sem;
+extern struct k_sem done_sem; 
 
 extern DectKnobs_t knobs;
 

@@ -30,8 +30,12 @@ extern const struct gpio_dt_spec tp27Switch;
 
 const struct gpio_dt_spec *beaconTxSwitch = &tp23Switch;
 const struct gpio_dt_spec *beaconRxSwitch = &tp23Switch;
+
 const struct gpio_dt_spec *dlSwitch = &tp24Switch;
 const struct gpio_dt_spec *ulSwitch = &tp25Switch;
+
+const struct gpio_dt_spec *ptDlSwitch = &tp25Switch;
+const struct gpio_dt_spec *ptUlSwitch = &tp24Switch;
 
 static const enum nrf_modem_dect_phy_radio_mode radioMode = NRF_MODEM_DECT_PHY_RADIO_MODE_LOW_LATENCY;
 
@@ -42,6 +46,8 @@ uint32_t tx_idleToActiveLatency;
 uint32_t tx_activeToIdleLatency;
 uint32_t rx_idleToActiveLatency;
 uint32_t rx_activeToIdleLatency;
+
+DectBeaconMessage_t beac;
 
 volatile enum DectPtState_e ptState = PT_STATE_IDLE;
 volatile enum DectFtState_e ftState = FT_STATE_IDLE;
@@ -87,6 +93,7 @@ uint64_t lastPccModemTick = 0;
 uint64_t lastPdcModemTick = 0;
 uint64_t lastBeaconModemTick = 0;
 uint64_t lastLoopModemTick = 0;
+uint64_t pccPdcDiff = 0;
 
 uint32_t lastBeaconTs = 0;
 
@@ -118,10 +125,12 @@ K_SEM_DEFINE(cancel_sem, 0, 1);
 K_SEM_DEFINE(rx_done_sem, 0, 1);
 K_SEM_DEFINE(tx_done_sem, 0, 1);
 K_SEM_DEFINE(time_sem, 0, 1);
+K_SEM_DEFINE(done_sem, 0, 1);
 
 bool DectPhy_PktIsBeacon(char *pkt)
 {
-  if (strncmp(pkt, "BEAC", 4) == 0)
+  DectBeaconMessage_t *beac = pkt;
+  if (strncmp(beac->magic, DECT_BEACON_MAGIC_STRING, 4) == 0)
   {
     return true;
   }
@@ -269,6 +278,9 @@ int DectPhy_TransmitHeadOfQueueAndReceive(uint32_t handle_offset, uint64_t start
   // }
   // inFlight->handle = handle;
   
+  static int testpayload = 0;
+  testpayload++;
+  
   struct phy_ctrl_field_common header = {
     .header_format = 0x0,
     .packet_length_type = DECT_PACKET_LENGTH_SLOT,
@@ -291,7 +303,7 @@ int DectPhy_TransmitHeadOfQueueAndReceive(uint32_t handle_offset, uint64_t start
       .carrier = CONFIG_CARRIER,
       .lbt_period = 0,// NRF_MODEM_DECT_LBT_PERIOD_MAX, // JON EXPERIMENTAL
       .phy_header = (union nrf_modem_dect_phy_hdr *) &header,
-      .data = "NONE", // TODO pull this from the head of queue
+      .data = &testpayload, //"NONE", // TODO pull this from the head of queue
       .data_size = 4,
     },
     .rx = {
@@ -359,7 +371,7 @@ int DectPhy_TransmitHeadOfQueue(uint32_t handle, uint64_t start_time)
 int DectPhy_TransmitBeacon(uint64_t start_time)
 {
   // TODO more in depth logic
-  return DectPhy_Transmit(BEACON_TX_HANDLE, "BEAC", 4, start_time);
+  return DectPhy_Transmit(BEACON_TX_HANDLE, &beac, sizeof(DectBeaconMessage_t), start_time);
 }
 
 // enqueue packets here to send them over the ethernet connection
@@ -423,7 +435,6 @@ static void on_capability_get(const struct nrf_modem_dect_phy_capability_get_eve
 static void on_pcc(const struct nrf_modem_dect_phy_pcc_event *evt)
 {
 	LOG_INF("PCC Received header from device ID %d", evt->hdr.hdr_type_1.transmitter_id_hi << 8 | evt->hdr.hdr_type_1.transmitter_id_lo);
-  lastPccModemTick = modem_time;
 }
 
 static void on_pcc_crc_err(const struct nrf_modem_dect_phy_pcc_crc_failure_event *evt)
@@ -531,6 +542,7 @@ static void dect_phy_event_handler(const struct nrf_modem_dect_phy_event *evt)
 		break;
 	case NRF_MODEM_DECT_PHY_EVT_PDC:
     lastPdcModemTick = modem_time;
+    pccPdcDiff = lastPdcModemTick - lastPccModemTick;
     if (iAmMaster)
     {
       Ft_HandleEvent(evt);
@@ -704,6 +716,10 @@ void DectPhy_Main(bool master)
   DectPhy_Init();
   int err;
   iAmMaster = master;
+
+  sprintf(beac.magic, "BEAC"); 
+  beac.ops_per_beacon = DECT_OPS_PER_BEACON;
+
   if (iAmMaster) // TODO currently these dont do anythying
   {
     Ft_Init();
