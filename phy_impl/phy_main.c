@@ -97,6 +97,12 @@ uint64_t pccPdcDiff = 0;
 
 uint32_t lastBeaconTs = 0;
 
+uint64_t genericBeaconScheduleOffset;
+uint64_t genericTxScheduleOffset;
+uint64_t genericRxScheduleOffset;
+uint64_t genericRxDuration;
+uint64_t genericRelativeRxSchedule;
+
 static volatile bool iAmMaster;
 
 /* Header type 1, due to endianness the order is different than in the specification. */
@@ -476,7 +482,17 @@ static void on_latency_info_get(const struct nrf_modem_dect_phy_latency_info_eve
             DECT_GAP_TICK, 
             opTransitionLatency, opStartupLatency, tx_idleToActiveLatency, tx_activeToIdleLatency, rx_idleToActiveLatency, rx_activeToIdleLatency,
             modem_time, k_uptime_ticks(), (uint64_t)(NRF_MODEM_DECT_MODEM_TIME_TICK_RATE_KHZ), (uint64_t) (CONFIG_SYS_CLOCK_TICKS_PER_SEC / 1000));
-    
+
+    genericBeaconScheduleOffset = DECT_MASTER_BEACON_PERIOD_TICK; // Currently unused
+    genericTxScheduleOffset = tx_activeToIdleLatency + rx_idleToActiveLatency + DECT_SLOT_DURATION_TICK + rx_activeToIdleLatency + (10 * DECT_GAP_TICK);
+    genericRxScheduleOffset = rx_activeToIdleLatency + tx_idleToActiveLatency + DECT_SLOT_DURATION_TICK + rx_activeToIdleLatency + (65 * DECT_GAP_TICK);
+    genericRxDuration = DECT_SLOT_DURATION_TICK + 30 * DECT_GAP_TICK;
+
+    genericRelativeRxSchedule = opTransitionLatency + 3 * DECT_GAP_TICK;
+
+    genericTxScheduleOffset += DECT_GUARD_TIME;
+    genericRxScheduleOffset += DECT_GUARD_TIME;
+    genericRxDuration += DECT_GUARD_TIME;
   }
   k_sem_give(&operation_sem);
 }

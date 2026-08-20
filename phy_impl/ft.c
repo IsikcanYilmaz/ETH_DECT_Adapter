@@ -144,10 +144,11 @@ static void mock_pdc(const struct nrf_modem_dect_phy_pdc_event *evt)
   LOG_WRN("PDC %s @ %llu", evt->data, modem_time);
 }
 
-static void mock_pcc(const struct nrf_modem_dect_phy_pdc_event *evt) 
+static void mock_pcc(const struct nrf_modem_dect_phy_pcc_event *evt) 
 {
-  LOG_WRN("PCC @ %llu", modem_time);
+  LOG_WRN("PCC %d @ %llu", evt->header_status, modem_time);
 }
+
 
 
 // TODO move this up
@@ -165,6 +166,7 @@ uint64_t ulScheduleOffset;
 uint64_t ulExpEnding;
 
 uint64_t relativeUlSchedule; // relative to the tx prior
+uint64_t rxDuration;
 
 uint64_t nextDlTxModemTick;
 uint64_t nextUlRxModemTick;
@@ -197,21 +199,21 @@ static void mock_complete(const struct nrf_modem_dect_phy_op_complete_event *evt
     {
 // tx_activeToIdleLatency + rx_idleToActiveLatency + DECT_SLOT_DURATION_TICK + rx_activeToIdleLatency
       err = DectPhy_TransmitHeadOfQueueAndReceive(testctr, 
-                                                  modem_time + dlScheduleOffset,
-                                                  relativeUlSchedule, 
-                                                  DECT_SLOT_DURATION_TICK + DECT_GUARD_TIME);
+                                                  modem_time + genericTxScheduleOffset,
+                                                  genericRelativeRxSchedule, 
+                                                  genericRxDuration);
     }
     else // OPS PER BEACON DONE
     {
       return; // TODO Remove 
       testctr = DECT_OPS_PER_BEACON;
-      beaconSchedule = modem_time + dlScheduleOffset;
+      beaconSchedule = modem_time + genericTxScheduleOffset;
       beaconExpEnding = beaconSchedule + DECT_SLOT_DURATION_TICK;
       err = DectPhy_TransmitBeacon(beaconSchedule);
       err = DectPhy_TransmitHeadOfQueueAndReceive(testctr, 
-                                                  beaconSchedule + dlScheduleOffset + DECT_SLOT_DURATION_TICK, 
-                                                  relativeUlSchedule, 
-                                                  DECT_SLOT_DURATION_TICK + DECT_GUARD_TIME);
+                                                  beaconSchedule + genericTxScheduleOffset + DECT_SLOT_DURATION_TICK, 
+                                                  genericRelativeRxSchedule, 
+                                                  genericRxDuration);
     }
     // // LOG_ERR("%s @ MT: %llu HANDLE DLTX (%lli). %llu - %llu", __FUNCTION__, modem_time, modem_time - dlExpEnding, nextDlTxModemTick, nextDlTxModemTick + DECT_SLOT_DURATION_TICK);
   }
@@ -239,7 +241,7 @@ static void mock_time_get(const struct nrf_modem_dect_phy_time_get_event *evt)
     beaconSchedule = base;
     beaconExpEnding = beaconSchedule + tx_idleToActiveLatency + DECT_SLOT_DURATION_TICK + (10 * DECT_GAP_TICK);
 
-    dlScheduleOffset = tx_activeToIdleLatency + rx_idleToActiveLatency + DECT_SLOT_DURATION_TICK + rx_activeToIdleLatency + (10 * DECT_GAP_TICK) + DECT_GUARD_TIME;
+    dlScheduleOffset = tx_activeToIdleLatency + rx_idleToActiveLatency + DECT_SLOT_DURATION_TICK + rx_activeToIdleLatency + (10 * DECT_GAP_TICK);
     dlSchedule = beaconExpEnding + opTransitionLatency + DECT_GUARD_TIME;
     dlExpEnding = dlSchedule + tx_idleToActiveLatency + DECT_SLOT_DURATION_TICK + DECT_GAP_TICK;
 
@@ -249,11 +251,13 @@ static void mock_time_get(const struct nrf_modem_dect_phy_time_get_event *evt)
 
     relativeUlSchedule = opTransitionLatency + 3 * DECT_GAP_TICK;
 
+    rxDuration = DECT_SLOT_DURATION_TICK + 24 * DECT_GAP_TICK + DECT_GUARD_TIME;
+
     dlScheduleOffset += DECT_GUARD_TIME;
     relativeUlSchedule += DECT_GUARD_TIME;
 
     err = DectPhy_TransmitBeacon(beaconSchedule);
-    err = DectPhy_TransmitHeadOfQueueAndReceive(testctr, dlSchedule, relativeUlSchedule, DECT_SLOT_DURATION_TICK + DECT_GUARD_TIME);
+    err = DectPhy_TransmitHeadOfQueueAndReceive(testctr, dlSchedule, genericRelativeRxSchedule, genericRxDuration); // note that here and only here we use the non generic dlSchedule time. just to start things off
   }
   warmedUp = true;
   k_sem_give(&time_sem);

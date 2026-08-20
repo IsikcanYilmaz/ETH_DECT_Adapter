@@ -158,36 +158,56 @@ static int guard_time = DECT_GUARD_TIME;
 static void mock_pdc(const struct nrf_modem_dect_phy_pdc_event *evt) // TODO make this part as lean as possible. just copy over the bytes and let a thread do processing
 {
   int err;
-  // LOG_WRN("DATA %s @ %llu. MyState %d", evt->data, modem_time, ptState);
-  LOG_WRN("PCC PDC DIFF %llu", lastPdcModemTick - lastPccModemTick);
-
-  if (ptState == PT_STATE_WAIT_FOR_BEACON) 
+  if (ptState == PT_STATE_WAIT_FOR_BEACON)
   {
-    if (DectPhy_PktIsBeacon(evt->data))  // RECEIVED BEACON
+    if (DectPhy_PktIsBeacon(evt->data)) // We were waiting for a beacon and have received one. schedule 1 DLRX 1 ULTX
     {
+      err = DectPhy_Receive(PT_RX_HANDLE, genericRxDuration + 100 * DECT_GAP_TICK, 0);
       gpio_pin_toggle_dt(beaconRxSwitch);
-      err = DectPhy_Receive(PT_RX_HANDLE, US_TO_MODEM_TICKS(10000000), 0); // SCHEDULE RECEPTION OF DOWNLINK TRANSMISSION
-      
-      DectBeaconMessage_t *beac = evt->data;
-      testctr = beac->ops_per_beacon;
-      LOG_WRN("BEACON RECEIVED %s num ops %d @ %llu. WAIT_FOR_BEACON -> DOWNLINK", beac->magic, beac->ops_per_beacon, modem_time);
       ptState = PT_STATE_SCHEDULED_DOWNLINK;
-      testctr = DECT_OPS_PER_BEACON;
-    }
-    else 
-    {
-      err = DectPhy_Receive(BEACON_RX_HANDLE, US_TO_MODEM_TICKS(10000000), 0); // RECEIVED UNEXPECTED DATA WHILE WAITING FOR BEACON 
+      LOG_WRN("BEACON RECEIVED WAITING FOR DOWNLINK");
     }
   }
-  else if (ptState == PT_STATE_SCHEDULED_DOWNLINK) // RECEIVED DOWNLINK TRANSMISSION FROM FT
+  else if (ptState == PT_STATE_SCHEDULED_DOWNLINK)
   {
+    err = DectPhy_TransmitHeadOfQueue(PT_TX_HANDLE, modem_time + 500 * DECT_GAP_TICK);
     gpio_pin_toggle_dt(ptDlSwitch);
-    err = DectPhy_TransmitHeadOfQueue(PT_TX_HANDLE, modem_time + rx_activeToIdleLatency + tx_idleToActiveLatency + 65 * DECT_GAP_TICK + DECT_GUARD_TIME);
+    LOG_WRN("DOWNLINK DATA RECEIVED");
+    LOG_HEXDUMP_WRN(evt->data, 16, "DLRX");
     ptState = PT_STATE_SCHEDULED_UPLINK;
-    LOG_WRN("DOWNLINK COMPLETE @ %llu. DOWNLINK -> UPLINK", modem_time);
-    LOG_HEXDUMP_WRN(evt->data, 16, "DOWNLINK RX");
-    k_sem_give(&done_sem);
   }
+
+  // int err;
+  // // LOG_WRN("DATA %s @ %llu. MyState %d", evt->data, modem_time, ptState);
+  // LOG_WRN("PCC PDC DIFF %llu", lastPdcModemTick - lastPccModemTick);
+  //
+  // if (ptState == PT_STATE_WAIT_FOR_BEACON) 
+  // {
+  //   if (DectPhy_PktIsBeacon(evt->data))  // RECEIVED BEACON
+  //   {
+  //     gpio_pin_toggle_dt(beaconRxSwitch);
+  //     err = DectPhy_Receive(PT_RX_HANDLE, US_TO_MODEM_TICKS(10000000), 0); // SCHEDULE RECEPTION OF DOWNLINK TRANSMISSION
+  //
+  //     DectBeaconMessage_t *beac = evt->data;
+  //     testctr = beac->ops_per_beacon;
+  //     LOG_WRN("BEACON RECEIVED %s num ops %d @ %llu. WAIT_FOR_BEACON -> DOWNLINK", beac->magic, beac->ops_per_beacon, modem_time);
+  //     ptState = PT_STATE_SCHEDULED_DOWNLINK;
+  //     testctr = DECT_OPS_PER_BEACON;
+  //   }
+  //   else 
+  //   {
+  //     err = DectPhy_Receive(BEACON_RX_HANDLE, US_TO_MODEM_TICKS(10000000), 0); // RECEIVED UNEXPECTED DATA WHILE WAITING FOR BEACON 
+  //   }
+  // }
+  // else if (ptState == PT_STATE_SCHEDULED_DOWNLINK) // RECEIVED DOWNLINK TRANSMISSION FROM FT
+  // {
+  //   gpio_pin_toggle_dt(ptDlSwitch);
+  //   err = DectPhy_TransmitHeadOfQueue(PT_TX_HANDLE, modem_time + rx_activeToIdleLatency + tx_idleToActiveLatency + 65 * DECT_GAP_TICK + DECT_GUARD_TIME);
+  //   ptState = PT_STATE_SCHEDULED_UPLINK;
+  //   LOG_WRN("DOWNLINK COMPLETE @ %llu. DOWNLINK -> UPLINK", modem_time);
+  //   LOG_HEXDUMP_WRN(evt->data, 16, "DOWNLINK RX");
+  //   k_sem_give(&done_sem);
+  // }
 }
 
 static void mock_complete(const struct nrf_modem_dect_phy_op_complete_event *evt)
@@ -199,25 +219,37 @@ static void mock_complete(const struct nrf_modem_dect_phy_op_complete_event *evt
     LOG_ERR("op_complete %s cb time %"PRIu64" status %x handle %d ", !IS_RX_HANDLE(evt->handle) ? "TX" : "RX", modem_time, evt->err, evt->handle);
   }
 
-  if (ptState == PT_STATE_SCHEDULED_UPLINK)
+  // if (evt->handle == PT_RX_HANDLE)
+  // {
+  //   LOG_WRN("RX TIMED OUT");
+  //   gpio_pin_toggle_dt(ptDlSwitch);
+  // }
+
+  if (ptState == PT_STATE_SCHEDULED_UPLINK && evt->handle == PT_TX_HANDLE)
   {
     gpio_pin_toggle_dt(ptUlSwitch);
-    if (testctr)
-    {
-      // err = DectPhy_Receive(PT_RX_HANDLE, US_TO_MODEM_TICKS(10000000), 0); // RECEIVE DOWNLINK TRANSMISSION
-      ptState = PT_STATE_SCHEDULED_DOWNLINK;
-      testctr--;
-      LOG_WRN("UPLINK COMPLETE @ %llu. UPLINK -> DOWNLINK %d", modem_time, testctr);
-
-      k_sem_give(&done_sem);
-    }
-    else
-    {
-      ptState = PT_STATE_WAIT_FOR_BEACON;
-      LOG_WRN("UPLINK COMPLETE @ %llu. UPLINK -> WAIT_FOR_BEACON %d", modem_time, testctr);
-    }
-
+    ptState = PT_STATE_FRAME_DONE;
+    k_sem_give(&done_sem);
   }
+
+  // if (ptState == PT_STATE_SCHEDULED_UPLINK)
+  // {
+  //   gpio_pin_toggle_dt(ptUlSwitch);
+  //   if (testctr)
+  //   {
+  //     // err = DectPhy_Receive(PT_RX_HANDLE, US_TO_MODEM_TICKS(10000000), 0); // RECEIVE DOWNLINK TRANSMISSION
+  //     ptState = PT_STATE_SCHEDULED_DOWNLINK;
+  //     testctr--;
+  //     LOG_WRN("UPLINK COMPLETE @ %llu. UPLINK -> DOWNLINK %d", modem_time, testctr);
+  //
+  //     k_sem_give(&done_sem);
+  //   }
+  //   else
+  //   {
+  //     ptState = PT_STATE_WAIT_FOR_BEACON;
+  //     LOG_WRN("UPLINK COMPLETE @ %llu. UPLINK -> WAIT_FOR_BEACON %d", modem_time, testctr);
+  //   }
+  // }
 
   k_sem_give(&operation_sem);
 }

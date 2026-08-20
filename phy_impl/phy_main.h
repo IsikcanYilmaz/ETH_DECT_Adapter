@@ -17,7 +17,7 @@
 #define DECT_GUARD_TIME (50 * DECT_GAP_TICK) // 5000 us
 
 // #define DECT_OPS_PER_BEACON 8 //164
-#define DECT_OPS_PER_BEACON 4 //164 // working
+#define DECT_OPS_PER_BEACON 100 //164 // working
 
 // #define DECT_MASTER_BEACON_PERIOD_TICK (10 * 24 * DECT_SLOT_DURATION_TICK) //(30 * 24 * DECT_SLOT_DURATION_TICK)
 #define DECT_MASTER_BEACON_PERIOD_TICK (20 * 24 * DECT_SLOT_DURATION_TICK) // working
@@ -136,6 +136,12 @@ extern uint32_t tx_idleToActiveLatency;
 extern uint32_t tx_activeToIdleLatency;
 extern uint32_t rx_idleToActiveLatency;
 extern uint32_t rx_activeToIdleLatency;
+
+extern uint64_t genericBeaconScheduleOffset;
+extern uint64_t genericTxScheduleOffset;
+extern uint64_t genericRxScheduleOffset;
+extern uint64_t genericRxDuration;
+extern uint64_t genericRelativeRxSchedule;
 
 extern const struct gpio_dt_spec *beaconTxSwitch;
 extern const struct gpio_dt_spec *beaconRxSwitch;
