@@ -5,10 +5,18 @@
 #define US_TO_MODEM_TICKS(us) (((uint64_t)(us)/1000)*NRF_MODEM_DECT_MODEM_TIME_TICK_RATE_KHZ)
 #define MODEM_TICKS_TO_MS(t) (t / NRF_MODEM_DECT_MODEM_TIME_TICK_RATE_KHZ)
 
+// Yanked from dect_shell sample code
+#define DECT_RADIO_FRAME_DURATION_US		(10000)
+#define DECT_RADIO_FRAME_DURATION_MS		(10)
+#define DECT_RADIO_SLOT_DURATION_US		((double)DECT_RADIO_FRAME_DURATION_US / 24)
+#define DECT_RADIO_SLOT_DURATION_IN_MODEM_TICKS (US_TO_MODEM_TICKS(DECT_RADIO_SLOT_DURATION_US))
+#define DECT_RADIO_SUBSLOT_DURATION_IN_MODEM_TICKS ((DECT_RADIO_SLOT_DURATION_IN_MODEM_TICKS) / 2) /* Note: assumes that mu = 1 */
+
 #define DECT_FRAME_DURATION_MS (10)
 #define DECT_FRAME_DURATION_US (10000)
 #define DECT_SLOTS_PER_FRAME (24)
 #define DECT_SLOT_DURATION_US (417) // 416.67
+// #define DECT_SLOT_DURATION_TICK DECT_RADIO_SUBSLOT_DURATION_IN_MODEM_TICKS //((uint64_t)((DECT_SLOT_DURATION_US * NRF_MODEM_DECT_MODEM_TIME_TICK_RATE_KHZ) / 1000))
 #define DECT_SLOT_DURATION_TICK ((uint64_t)((DECT_SLOT_DURATION_US * NRF_MODEM_DECT_MODEM_TIME_TICK_RATE_KHZ) / 1000))
 
 #define DECT_GAP_US (5) // ?
@@ -154,6 +162,8 @@ extern const struct gpio_dt_spec *ptUlSwitch;
 extern struct k_sem operation_sem;
 extern struct k_sem time_sem;
 extern struct k_sem done_sem; 
+
+extern sys_slist_t ops_list;
 
 extern DectKnobs_t knobs;
 

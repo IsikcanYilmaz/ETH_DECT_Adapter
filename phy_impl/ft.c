@@ -184,6 +184,26 @@ static void mock_complete(const struct nrf_modem_dect_phy_op_complete_event *evt
     return;
   }
 
+  
+  if (evt->handle == 0)
+  {
+    DectPhy_TransmitHeadOfQueue(2, modem_time + DECT_SLOT_DURATION_TICK + 2 * opTransitionLatency);
+  }
+  if (evt->handle == 1)
+  {
+    DectPhy_Receive(3, DECT_SLOT_DURATION_TICK, modem_time + DECT_SLOT_DURATION_TICK + 2 * opTransitionLatency);
+  }
+  if (evt->handle == 2)
+  {
+    
+  }
+
+
+  LOG_WRN("OP COMPLETE @ %llu", modem_time);
+
+
+  return; // TODO REMOVE
+
   if (evt->handle == BEACON_TX_HANDLE) /////////////////////////////////////// BEAC ///////////////////////////////////////
   {
     gpio_pin_toggle_dt(beaconTxSwitch);
@@ -231,36 +251,69 @@ static void mock_time_get(const struct nrf_modem_dect_phy_time_get_event *evt)
   gpio_pin_toggle_dt(beaconTxSwitch);
   gpio_pin_toggle_dt(dlSwitch);
   gpio_pin_toggle_dt(ulSwitch);
-  if (!warmedUp)
-  {
-    int err;
 
-    base = modem_time + 50 * DECT_SLOT_DURATION_TICK;
+  // QUESTION: What's the closest 2 txs I can put next to one another?
+  // ANSWER: Once you make sure you were sending 1 slot, then its 1 slot + op trans
+  // QUESTION: What about 2 rxs?
+  // ANSWER: Same.
+  // QUESTION: What about 1 TX 1 RX? 
+  // A: FUCKING SAME
+  // IMPORTANT QUESTION: What about JIT scheduling? would it now work?
+  uint64_t base = modem_time + 1000 * DECT_GAP_TICK;
 
-    beaconScheduleOffset = DECT_MASTER_BEACON_PERIOD_TICK; // - (24 * DECT_GAP_TICK);
-    beaconSchedule = base;
-    beaconExpEnding = beaconSchedule + tx_idleToActiveLatency + DECT_SLOT_DURATION_TICK + (10 * DECT_GAP_TICK);
+  uint64_t finishOffset = DECT_SLOT_DURATION_TICK + opTransitionLatency;
 
-    dlScheduleOffset = tx_activeToIdleLatency + rx_idleToActiveLatency + DECT_SLOT_DURATION_TICK + rx_activeToIdleLatency + (10 * DECT_GAP_TICK);
-    dlSchedule = beaconExpEnding + opTransitionLatency + DECT_GUARD_TIME;
-    dlExpEnding = dlSchedule + tx_idleToActiveLatency + DECT_SLOT_DURATION_TICK + DECT_GAP_TICK;
+  uint64_t nextOffset = finishOffset;
 
-    ulScheduleOffset = rx_activeToIdleLatency + tx_idleToActiveLatency + DECT_SLOT_DURATION_TICK + tx_activeToIdleLatency + (65 * DECT_GAP_TICK);
-    ulSchedule = dlExpEnding + tx_activeToIdleLatency + rx_idleToActiveLatency;
-    ulExpEnding = ulSchedule + DECT_SLOT_DURATION_TICK + rx_activeToIdleLatency;
+  LOG_WRN("TEST: base %llu next %llu", base, nextOffset);
+  // DectPhy_TransmitBeacon(base);
+  DectPhy_TransmitHeadOfQueue(0, base);
+  // DectPhy_TransmitHeadOfQueue(1, base + nextOffset);
+  DectPhy_Receive(1, DECT_SLOT_DURATION_TICK, base + nextOffset);
+  // DectPhy_TransmitHeadOfQueue(FT_TX_HANDLE + 1, base + 2 * nextOffset);
+  // DectPhy_TransmitHeadOfQueue(FT_TX_HANDLE + 2, base + 3 * nextOffset);
+  // DectPhy_TransmitHeadOfQueue(FT_TX_HANDLE + 3, base + 4 * nextOffset);
+  // DectPhy_TransmitHeadOfQueue(FT_TX_HANDLE + 4, base + 5 * nextOffset);
+  //
+  // DectPhy_Receive(FT_RX_HANDLE+1, DECT_SLOT_DURATION_TICK, base + nextOffset);
+  // DectPhy_TransmitHeadOfQueue(FT_TX_HANDLE+2, base + 2*nextOffset);
+  // DectPhy_Receive(FT_RX_HANDLE+3, DECT_SLOT_DURATION_TICK, base + 3*nextOffset);
+  // DectPhy_TransmitHeadOfQueue(FT_TX_HANDLE+4, base + 4*nextOffset);
+  // DectPhy_Receive(FT_RX_HANDLE + 1, DECT_SLOT_DURATION_TICK, base + nextOffset);
+  
 
-    relativeUlSchedule = opTransitionLatency + 3 * DECT_GAP_TICK;
 
-    rxDuration = DECT_SLOT_DURATION_TICK + 24 * DECT_GAP_TICK + DECT_GUARD_TIME;
 
-    dlScheduleOffset += DECT_GUARD_TIME;
-    relativeUlSchedule += DECT_GUARD_TIME;
-
-    err = DectPhy_TransmitBeacon(beaconSchedule);
-    err = DectPhy_TransmitHeadOfQueueAndReceive(testctr, dlSchedule, genericRelativeRxSchedule, genericRxDuration); // note that here and only here we use the non generic dlSchedule time. just to start things off
-  }
-  warmedUp = true;
-  k_sem_give(&time_sem);
+  // if (!warmedUp)
+  // {
+  //   int err;
+  //
+  //   base = modem_time + 50 * DECT_SLOT_DURATION_TICK;
+  //
+  //   beaconScheduleOffset = DECT_MASTER_BEACON_PERIOD_TICK; // - (24 * DECT_GAP_TICK);
+  //   beaconSchedule = base;
+  //   beaconExpEnding = beaconSchedule + tx_idleToActiveLatency + DECT_SLOT_DURATION_TICK + (10 * DECT_GAP_TICK);
+  //
+  //   dlScheduleOffset = tx_activeToIdleLatency + rx_idleToActiveLatency + DECT_SLOT_DURATION_TICK + rx_activeToIdleLatency + (10 * DECT_GAP_TICK);
+  //   dlSchedule = beaconExpEnding + opTransitionLatency + DECT_GUARD_TIME;
+  //   dlExpEnding = dlSchedule + tx_idleToActiveLatency + DECT_SLOT_DURATION_TICK + DECT_GAP_TICK;
+  //
+  //   ulScheduleOffset = rx_activeToIdleLatency + tx_idleToActiveLatency + DECT_SLOT_DURATION_TICK + tx_activeToIdleLatency + (65 * DECT_GAP_TICK);
+  //   ulSchedule = dlExpEnding + tx_activeToIdleLatency + rx_idleToActiveLatency;
+  //   ulExpEnding = ulSchedule + DECT_SLOT_DURATION_TICK + rx_activeToIdleLatency;
+  //
+  //   relativeUlSchedule = opTransitionLatency + 3 * DECT_GAP_TICK;
+  //
+  //   rxDuration = DECT_SLOT_DURATION_TICK + 24 * DECT_GAP_TICK + DECT_GUARD_TIME;
+  //
+  //   dlScheduleOffset += DECT_GUARD_TIME;
+  //   relativeUlSchedule += DECT_GUARD_TIME;
+  //
+  //   err = DectPhy_TransmitBeacon(beaconSchedule);
+  //   err = DectPhy_TransmitHeadOfQueueAndReceive(testctr, dlSchedule, genericRelativeRxSchedule, genericRxDuration); // note that here and only here we use the non generic dlSchedule time. just to start things off
+  // }
+  // warmedUp = true;
+  // k_sem_give(&time_sem);
 }
 
 ///////////////////////////////
@@ -297,6 +350,8 @@ void Ft_Init(void)
 {
   // DectPhy_Transmit(GARBAGE_HANDLE, "GARBAGE", 7, 0); // TODO For some reason, the Very first transmission contains garbage data. maybe the buffer needs flushing somehow. this does that. awful solution replace it
   // k_sem_take(&operation_sem, K_FOREVER);
+ 
+
 }
 
 void Ft_InfiniteLoop(void)

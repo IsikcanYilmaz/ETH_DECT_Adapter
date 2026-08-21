@@ -224,6 +224,7 @@ static void mock_complete(const struct nrf_modem_dect_phy_op_complete_event *evt
   //   LOG_WRN("RX TIMED OUT");
   //   gpio_pin_toggle_dt(ptDlSwitch);
   // }
+  k_sem_give(&done_sem);
 
   if (ptState == PT_STATE_SCHEDULED_UPLINK && evt->handle == PT_TX_HANDLE)
   {
@@ -267,8 +268,8 @@ void Pt_HandleEvent(const struct nrf_modem_dect_phy_event *evt)
   if (evt->id == NRF_MODEM_DECT_PHY_EVT_PDC)
   {
     // on_pdc_pt(&evt->pdc);
-    mock_pdc(&evt->pdc);
-    // print_pdc(&evt->pdc);
+    // mock_pdc(&evt->pdc);
+    print_pdc(&evt->pdc);
     // LOG_ERR("PDC @ MT %llu. pcc delta %llu", modem_time, lastPdcModemTick - lastPccModemTick); // TODO REMOVE
   }
   else if (evt->id == NRF_MODEM_DECT_PHY_EVT_PCC)
@@ -312,8 +313,8 @@ void Pt_InfiniteLoop(void)
 
     LOG_ERR("PT LOOP BEGIN");
 
-    err = DectPhy_Receive(BEACON_RX_HANDLE, US_TO_MODEM_TICKS(100000000), 0); // GET FAKE BEACON
-    // DectPhy_ReceiveContinuous(PT_RX_HANDLE, US_TO_MODEM_TICKS(10000000), 0); // Get first beacon
+    // err = DectPhy_Receive(BEACON_RX_HANDLE, US_TO_MODEM_TICKS(100000000), 0); // GET FAKE BEACON
+    DectPhy_ReceiveContinuous(PT_RX_HANDLE, US_TO_MODEM_TICKS(100000000), 0); // Get first beacon
     k_sem_take(&done_sem, K_FOREVER);
     
     LOG_ERR("DONE");
