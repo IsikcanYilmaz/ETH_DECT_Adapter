@@ -410,30 +410,31 @@ int DectPhy_TransmitBeacon(uint64_t start_time)
   beac.this_beacon_time = start_time;
 
   // TODO make these generic, reuse
-  struct phy_ctrl_field_common header = {
-    .header_format = 0x0,
-    .packet_length_type = DECT_PACKET_LENGTH_SLOT,
-    .packet_length = 0x00,
-    .short_network_id = (CONFIG_APP_NETWORK_ID & 0xff),
-    .transmitter_id_hi = (device_id >> 8),
-    .transmitter_id_lo = (device_id & 0xff),
-    .transmit_power = CONFIG_APP_TX_POWER,
-    .reserved = 0,
-    .df_mcs = knobs.mcs,
-  };
+  // struct phy_ctrl_field_common header = {
+  //   .header_format = 0x0,
+  //   .packet_length_type = DECT_PACKET_LENGTH_SLOT,
+  //   .packet_length = 0x00,
+  //   .short_network_id = (CONFIG_APP_NETWORK_ID & 0xff),
+  //   .transmitter_id_hi = (device_id >> 8),
+  //   .transmitter_id_lo = (device_id & 0xff),
+  //   .transmit_power = CONFIG_APP_TX_POWER,
+  //   .reserved = 0,
+  //   .df_mcs = knobs.mcs,
+  // };
+  //
+  // struct nrf_modem_dect_phy_tx_params tx_op_params = {
+  //   .start_time = start_time,
+  //   .handle = handle,
+  //   .network_id = CONFIG_APP_NETWORK_ID,
+  //   .phy_type = 0,
+  //   .lbt_rssi_threshold_max = 0,
+  //   .carrier = CONFIG_CARRIER,
+  //   .lbt_period = 0,// NRF_MODEM_DECT_LBT_PERIOD_MAX, // JON EXPERIMENTAL
+  //   .phy_header = (union nrf_modem_dect_phy_hdr *) &header,
+  //   .data = data,
+  //   .data_size = data_len,
+  // };
 
-  struct nrf_modem_dect_phy_tx_params tx_op_params = {
-    .start_time = start_time,
-    .handle = handle,
-    .network_id = CONFIG_APP_NETWORK_ID,
-    .phy_type = 0,
-    .lbt_rssi_threshold_max = 0,
-    .carrier = CONFIG_CARRIER,
-    .lbt_period = 0,// NRF_MODEM_DECT_LBT_PERIOD_MAX, // JON EXPERIMENTAL
-    .phy_header = (union nrf_modem_dect_phy_hdr *) &header,
-    .data = data,
-    .data_size = data_len,
-  };
   return DectPhy_Transmit(BEACON_TX_HANDLE, &beac, sizeof(DectBeaconMessage_t), start_time);
 }
 
