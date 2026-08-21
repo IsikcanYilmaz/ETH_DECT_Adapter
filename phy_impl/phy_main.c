@@ -105,7 +105,7 @@ uint64_t genericRxScheduleOffset;
 uint64_t genericRxDuration;
 uint64_t genericRelativeRxSchedule;
 
-static volatile bool iAmMaster;
+static volatile bool iAmFt;
 
 /* Header type 1, due to endianness the order is different than in the specification. */
 struct phy_ctrl_field_common {
@@ -152,45 +152,6 @@ bool DectPhy_PktIsNone(char *pkt)
     return true;
   }
   return false;
-}
-
-int DectPhy_Transmit(uint32_t handle, void *data, size_t data_len, uint64_t start_time)
-{
-  int err;
-
-  struct phy_ctrl_field_common header = {
-    .header_format = 0x0,
-    .packet_length_type = DECT_PACKET_LENGTH_SLOT,
-    .packet_length = 0x00,
-    .short_network_id = (CONFIG_APP_NETWORK_ID & 0xff),
-    .transmitter_id_hi = (device_id >> 8),
-    .transmitter_id_lo = (device_id & 0xff),
-    .transmit_power = CONFIG_APP_TX_POWER,
-    .reserved = 0,
-    .df_mcs = knobs.mcs,
-  };
-
-  struct nrf_modem_dect_phy_tx_params tx_op_params = {
-    .start_time = start_time,
-    .handle = handle,
-    .network_id = CONFIG_APP_NETWORK_ID,
-    .phy_type = 0,
-    .lbt_rssi_threshold_max = 0,
-    .carrier = CONFIG_CARRIER,
-    .lbt_period = 0,// NRF_MODEM_DECT_LBT_PERIOD_MAX, // JON EXPERIMENTAL
-    .phy_header = (union nrf_modem_dect_phy_hdr *) &header,
-    .data = data,
-    .data_size = data_len,
-  };
-
-  LOG_DBG("Transmitting %d bytes", data_len);
-
-  err = nrf_modem_dect_phy_tx(&tx_op_params);
-	if (err != 0) {
-		return err;
-	}
-
-	return 0;
 }
 
 int DectPhy_ReceiveContinuous(uint32_t handle, uint32_t durationTicks, uint64_t start_time)
@@ -271,6 +232,45 @@ void DectPhy_InFlightCompleted(void)
       k_free(pktToFree);
     }
   }
+}
+
+int DectPhy_Transmit(uint32_t handle, void *data, size_t data_len, uint64_t start_time)
+{
+  int err;
+
+  struct phy_ctrl_field_common header = {
+    .header_format = 0x0,
+    .packet_length_type = DECT_PACKET_LENGTH_SLOT,
+    .packet_length = 0x00,
+    .short_network_id = (CONFIG_APP_NETWORK_ID & 0xff),
+    .transmitter_id_hi = (device_id >> 8),
+    .transmitter_id_lo = (device_id & 0xff),
+    .transmit_power = CONFIG_APP_TX_POWER,
+    .reserved = 0,
+    .df_mcs = knobs.mcs,
+  };
+
+  struct nrf_modem_dect_phy_tx_params tx_op_params = {
+    .start_time = start_time,
+    .handle = handle,
+    .network_id = CONFIG_APP_NETWORK_ID,
+    .phy_type = 0,
+    .lbt_rssi_threshold_max = 0,
+    .carrier = CONFIG_CARRIER,
+    .lbt_period = 0,// NRF_MODEM_DECT_LBT_PERIOD_MAX, // JON EXPERIMENTAL
+    .phy_header = (union nrf_modem_dect_phy_hdr *) &header,
+    .data = data,
+    .data_size = data_len,
+  };
+
+  LOG_DBG("Transmitting %d bytes", data_len);
+
+  err = nrf_modem_dect_phy_tx(&tx_op_params);
+	if (err != 0) {
+		return err;
+	}
+
+	return 0;
 }
 
 int DectPhy_TransmitHeadOfQueueAndReceive(uint32_t handle_offset, uint64_t start_time_tx, uint64_t start_time_rx, uint32_t rx_duration)
@@ -408,6 +408,32 @@ int DectPhy_TransmitBeacon(uint64_t start_time)
 {
   // TODO more in depth logic
   beac.this_beacon_time = start_time;
+
+  // TODO make these generic, reuse
+  struct phy_ctrl_field_common header = {
+    .header_format = 0x0,
+    .packet_length_type = DECT_PACKET_LENGTH_SLOT,
+    .packet_length = 0x00,
+    .short_network_id = (CONFIG_APP_NETWORK_ID & 0xff),
+    .transmitter_id_hi = (device_id >> 8),
+    .transmitter_id_lo = (device_id & 0xff),
+    .transmit_power = CONFIG_APP_TX_POWER,
+    .reserved = 0,
+    .df_mcs = knobs.mcs,
+  };
+
+  struct nrf_modem_dect_phy_tx_params tx_op_params = {
+    .start_time = start_time,
+    .handle = handle,
+    .network_id = CONFIG_APP_NETWORK_ID,
+    .phy_type = 0,
+    .lbt_rssi_threshold_max = 0,
+    .carrier = CONFIG_CARRIER,
+    .lbt_period = 0,// NRF_MODEM_DECT_LBT_PERIOD_MAX, // JON EXPERIMENTAL
+    .phy_header = (union nrf_modem_dect_phy_hdr *) &header,
+    .data = data,
+    .data_size = data_len,
+  };
   return DectPhy_Transmit(BEACON_TX_HANDLE, &beac, sizeof(DectBeaconMessage_t), start_time);
 }
 
@@ -557,7 +583,7 @@ static void dect_phy_event_handler(const struct nrf_modem_dect_phy_event *evt)
 		// on_radio_config(&evt->radio_config);
 		break;
 	case NRF_MODEM_DECT_PHY_EVT_COMPLETED:
-    if (iAmMaster)
+    if (iAmFt)
     {
       Ft_HandleEvent(evt);
     }
@@ -575,7 +601,7 @@ static void dect_phy_event_handler(const struct nrf_modem_dect_phy_event *evt)
 	case NRF_MODEM_DECT_PHY_EVT_PCC:
 		// on_pcc(&evt->pcc);
     lastPccModemTick = modem_time;
-    if (iAmMaster)
+    if (iAmFt)
     {
       Ft_HandleEvent(evt);
     }
@@ -590,7 +616,7 @@ static void dect_phy_event_handler(const struct nrf_modem_dect_phy_event *evt)
 	case NRF_MODEM_DECT_PHY_EVT_PDC:
     lastPdcModemTick = modem_time;
     pccPdcDiff = lastPdcModemTick - lastPccModemTick;
-    if (iAmMaster)
+    if (iAmFt)
     {
       Ft_HandleEvent(evt);
     }
@@ -603,7 +629,7 @@ static void dect_phy_event_handler(const struct nrf_modem_dect_phy_event *evt)
 		on_pdc_crc_err(&evt->pdc_crc_err);
 		break;
 	case NRF_MODEM_DECT_PHY_EVT_TIME:
-    if (iAmMaster)
+    if (iAmFt)
     {
       Ft_HandleEvent(evt);
     }
@@ -720,12 +746,10 @@ bool DectPhy_WiznetAlert(void) // TODO better way of doing this
 
 static int cmd_bridge(const struct shell *shell, size_t argc, char **argv)
 {
-  if (strcmp(argv[1], "status") == 0)
+  if (argc == 0 || strcmp(argv[1], "status") == 0)
   {
     shell_print(shell, "Dect Bridge status:");
-    // queues
-    // extern struct k_queue ethTxQueue; // TODO JON There comes a point where we dont free these things
-    // extern struct k_queue ethRxQueue;
+    shell_print(shell, "I am : %s", (iAmFt) ? "FT" : "PT");
   }
   if (strncmp(argv[1], "mcs", 3) == 0)
   {
@@ -762,12 +786,12 @@ void DectPhy_Main(bool master)
 
   DectPhy_Init();
   int err;
-  iAmMaster = master;
+  iAmFt = master;
 
   sprintf(beac.magic, "BEAC"); 
   beac.ops_per_beacon = DECT_OPS_PER_BEACON;
 
-  if (iAmMaster) // TODO currently these dont do anythying
+  if (iAmFt) // TODO currently these dont do anythying
   {
     Ft_Init();
   }
@@ -779,7 +803,7 @@ void DectPhy_Main(bool master)
   nrf_modem_dect_phy_time_get(); 
   k_sem_take(&time_sem, K_FOREVER);
 
-  if (iAmMaster)
+  if (iAmFt)
   {
     Ft_InfiniteLoop();
   }

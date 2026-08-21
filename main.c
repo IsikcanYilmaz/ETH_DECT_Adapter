@@ -15,8 +15,8 @@
 #include "phy_main.h"
 #endif
 
-static const struct gpio_dt_spec masterSlaveSwitchInput = GPIO_DT_SPEC_GET(DT_PATH(zephyr_user), master_slave_input_gpios);
-static const struct gpio_dt_spec masterSlaveSwitchOutput = GPIO_DT_SPEC_GET(DT_PATH(zephyr_user), master_slave_output_gpios);
+static const struct gpio_dt_spec ftPtSwitchInput = GPIO_DT_SPEC_GET(DT_PATH(zephyr_user), ft_pt_input_gpios);
+static const struct gpio_dt_spec ftPtSwitchOutput = GPIO_DT_SPEC_GET(DT_PATH(zephyr_user), ft_pt_output_gpios);
 
 const struct gpio_dt_spec tp23Switch = GPIO_DT_SPEC_GET(DT_PATH(zephyr_user), tp_23_gpios);
 const struct gpio_dt_spec tp24Switch = GPIO_DT_SPEC_GET(DT_PATH(zephyr_user), tp_24_gpios);
@@ -89,10 +89,10 @@ int main(void)
   err = dk_buttons_init(button_handler);
   // err = dk_leds_init();
 
-  // MASTER SLAVE SWITCH
-  // On Init P0.21 will be read. If it's HIGH then this board is MASTER
-  err = gpio_pin_configure_dt(&masterSlaveSwitchInput, GPIO_INPUT | GPIO_PULL_DOWN);
-  err = gpio_pin_configure_dt(&masterSlaveSwitchOutput, GPIO_OUTPUT_ACTIVE);
+  // FT PT SWITCH
+  // On Init P0.21 will be read. If it's HIGH then this board is FT 
+  err = gpio_pin_configure_dt(&ftPtSwitchInput, GPIO_INPUT | GPIO_PULL_DOWN);
+  err = gpio_pin_configure_dt(&ftPtSwitchOutput, GPIO_OUTPUT_ACTIVE);
 
   // Test points
   err = gpio_pin_configure_dt(&tp23Switch, GPIO_OUTPUT_INACTIVE);
@@ -104,9 +104,9 @@ int main(void)
   // err = gpio_pin_configure_dt(&tp04Switch, GPIO_OUTPUT_INACTIVE);
 
   // Check the ft/pt switch 
-  gpio_pin_set_dt(&masterSlaveSwitchOutput, 1);
-  bool iAmMaster = gpio_pin_get_dt(&masterSlaveSwitchInput);
-  LOG_WRN("I AM %s", (iAmMaster) ? "MASTER" : "SLAVE");
+  gpio_pin_set_dt(&ftPtSwitchOutput, 1);
+  bool iAmFt = gpio_pin_get_dt(&ftPtSwitchInput);
+  LOG_WRN("I AM %s", (iAmFt) ? "FT" : "PT");
 
 	err = hwinfo_get_device_id((void *)&device_id, sizeof(device_id));
 	if (err < 0) 
@@ -120,12 +120,12 @@ int main(void)
 
   #if CONFIG_MAC_IMPL
   LeanWiznet_SetRxCallback(Mac_TxReady);
-  Mac_main(iAmMaster);
+  Mac_main(iAmFt);
   #endif
 
   #if CONFIG_PHY_IMPL
   LeanWiznet_SetRxCallback(DectPhy_WiznetAlert);
-  DectPhy_Main(iAmMaster); 
+  DectPhy_Main(iAmFt); 
   #endif
 
   while (true)

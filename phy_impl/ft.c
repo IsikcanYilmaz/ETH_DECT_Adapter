@@ -285,7 +285,6 @@ void Ft_Init(void)
 {
   // DectPhy_Transmit(GARBAGE_HANDLE, "GARBAGE", 7, 0); // TODO For some reason, the Very first transmission contains garbage data. maybe the buffer needs flushing somehow. this does that. awful solution replace it
   // k_sem_take(&operation_sem, K_FOREVER);
- 
 
 }
 

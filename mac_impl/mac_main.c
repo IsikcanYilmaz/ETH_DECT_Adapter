@@ -1913,7 +1913,7 @@ SHELL_CMD_ARG_REGISTER(dongle, NULL, "Dongle <start|stop>", cmd_dongle, 2, 0);
 
 SHELL_CMD_ARG_REGISTER(bigsend, NULL, "bigsend <bytes>", cmd_bigsend, 2, 0);
 
-int Mac_main(bool iAmMaster)
+int Mac_main(bool iAmFt)
 {
   int err;
   ssize_t id_len; uint8_t id_buf[4] = {0};

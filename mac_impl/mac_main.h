@@ -107,7 +107,7 @@ typedef struct DonglePktMetadata_s
   uint16_t payloadLen;
 } __attribute__((packed)) DonglePktMetadata_t;
 
-int Mac_main(bool iAmMaster);
+int Mac_main(bool iAmFt);
 void Mac_TxReady(void);
 int dect_send(enum app_mode source_mode, const char *buf, size_t len); // TODO better naming
 enum app_mode Mac_Whatami(void);

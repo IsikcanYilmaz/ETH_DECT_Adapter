@@ -17,6 +17,8 @@
 #define DECT_SLOTS_PER_FRAME (24)
 #define DECT_SLOT_DURATION_US (417) // 416.67
 // #define DECT_SLOT_DURATION_TICK DECT_RADIO_SUBSLOT_DURATION_IN_MODEM_TICKS //((uint64_t)((DECT_SLOT_DURATION_US * NRF_MODEM_DECT_MODEM_TIME_TICK_RATE_KHZ) / 1000))
+//
+#define DECT_HALF_SLOT_DURATION_TICK ((uint64_t)((DECT_SLOT_DURATION_US * NRF_MODEM_DECT_MODEM_TIME_TICK_RATE_KHZ / 2 ) / 1000))
 #define DECT_SLOT_DURATION_TICK ((uint64_t)((DECT_SLOT_DURATION_US * NRF_MODEM_DECT_MODEM_TIME_TICK_RATE_KHZ) / 1000))
 
 #define DECT_GAP_US (5) // ?
@@ -25,7 +27,7 @@
 #define DECT_GUARD_TIME (10 * DECT_GAP_TICK) // 5000 us
 
 // #define DECT_OPS_PER_BEACON 8 //164
-#define DECT_OPS_PER_BEACON 12 //164 // working
+#define DECT_OPS_PER_BEACON 4 //164 // working
 
 // #define DECT_MASTER_BEACON_PERIOD_TICK (10 * 24 * DECT_SLOT_DURATION_TICK) //(30 * 24 * DECT_SLOT_DURATION_TICK)
 #define DECT_MASTER_BEACON_PERIOD_TICK (20 * 24 * DECT_SLOT_DURATION_TICK) // working
@@ -73,6 +75,7 @@ enum DectPtState_e
   PT_STATE_SCHEDULED_DOWNLINK,
   PT_STATE_SCHEDULED_UPLINK,
   PT_STATE_FRAME_DONE,
+  PT_STATE_TEST,
   PT_STATE_MAX,
 };
 
@@ -171,7 +174,7 @@ extern sys_slist_t ops_list;
 
 extern DectKnobs_t knobs;
 
-void DectPhy_Main(bool iAmMaster);
+void DectPhy_Main(bool iAmFt);
 bool DectPhy_WiznetAlert(void); // TODO better way of doing this
 
 // Below should only be used by ft.c and pt.c // TODO maybe make these such that they are accessible thru a struct that only pt/ft can
