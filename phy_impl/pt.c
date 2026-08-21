@@ -153,8 +153,6 @@ static void mock_pcc(const struct nrf_modem_dect_phy_pcc_event *evt)
 static char test[4];
 static volatile int testctr = DECT_OPS_PER_BEACON; 
 
-static int guard_time = DECT_GUARD_TIME;
-
 static void mock_pdc(const struct nrf_modem_dect_phy_pdc_event *evt) // TODO make this part as lean as possible. just copy over the bytes and let a thread do processing
 {
   int err;
@@ -162,52 +160,55 @@ static void mock_pdc(const struct nrf_modem_dect_phy_pdc_event *evt) // TODO mak
   {
     if (DectPhy_PktIsBeacon(evt->data)) // We were waiting for a beacon and have received one. schedule 1 DLRX 1 ULTX
     {
-      err = DectPhy_Receive(PT_RX_HANDLE, genericRxDuration + 100 * DECT_GAP_TICK, 0);
+      DectBeaconMessage_t *beac = evt->data;
+      uint16_t ops_per_beacon = beac->ops_per_beacon;
+      uint64_t next_beacon_tick = modem_time + ((2 * ops_per_beacon + 1) * opTransitionLatency) + (2 * ops_per_beacon * DECT_SLOT_DURATION_TICK) ;
+      uint64_t next_dl_tick = next_beacon_tick + DECT_SLOT_DURATION_TICK + opTransitionLatency;
+      uint64_t next_ul_tick = next_dl_tick + DECT_SLOT_DURATION_TICK + opTransitionLatency;
+      
+      /*
+       * we should latch to the next beacon
+       */
+
+      err = DectPhy_Receive(BEACON_LATCH_RX_HANDLE, DECT_SLOT_DURATION_TICK, next_beacon_tick);
+      err = DectPhy_Receive(PT_RX_HANDLE, DECT_SLOT_DURATION_TICK, next_dl_tick);
       gpio_pin_toggle_dt(beaconRxSwitch);
+      ptState = PT_STATE_WAIT_FOR_LATCH_BEACON;
+      LOG_WRN("BEACON RECEIVED WAITING FOR LATCH BEACON AFTER %d OPS", 2 * ops_per_beacon);
+    }
+    else
+    {
+      err = DectPhy_Receive(BEACON_RX_HANDLE, US_TO_MODEM_TICKS(1000000000), 0); // Unexpected non beacon
+      // LOG_WRN("NON BEACON %d", err);
+    }
+  }
+  else if (ptState == PT_STATE_WAIT_FOR_LATCH_BEACON)
+  {
+    if (DectPhy_PktIsBeacon(evt->data))
+    {
+      LOG_WRN("LATCH BEACON RECEIVED");
       ptState = PT_STATE_SCHEDULED_DOWNLINK;
-      LOG_WRN("BEACON RECEIVED WAITING FOR DOWNLINK");
+      gpio_pin_toggle_dt(beaconRxSwitch);
+      // k_sem_give(&done_sem);
+    }
+    else 
+    {
+      err = DectPhy_Receive(BEACON_RX_HANDLE, US_TO_MODEM_TICKS(1000000000), 0); // Unexpected non beacon // TODO maybe just do this in the op_complete part
+      ptState = PT_STATE_WAIT_FOR_BEACON;
+      LOG_ERR("LATCH BEACON MISSED. GOING BACK TO PT_STATE_WAIT_FOR_BEACON");
     }
   }
   else if (ptState == PT_STATE_SCHEDULED_DOWNLINK)
   {
-    err = DectPhy_TransmitHeadOfQueue(PT_TX_HANDLE, modem_time + 500 * DECT_GAP_TICK);
+    // err = DectPhy_TransmitHeadOfQueue(PT_TX_HANDLE, modem_time + 500 * DECT_GAP_TICK);
     gpio_pin_toggle_dt(ptDlSwitch);
     LOG_WRN("DOWNLINK DATA RECEIVED");
     LOG_HEXDUMP_WRN(evt->data, 16, "DLRX");
     ptState = PT_STATE_SCHEDULED_UPLINK;
+
+    // k_sem_give(&done_sem);
   }
 
-  // int err;
-  // // LOG_WRN("DATA %s @ %llu. MyState %d", evt->data, modem_time, ptState);
-  // LOG_WRN("PCC PDC DIFF %llu", lastPdcModemTick - lastPccModemTick);
-  //
-  // if (ptState == PT_STATE_WAIT_FOR_BEACON) 
-  // {
-  //   if (DectPhy_PktIsBeacon(evt->data))  // RECEIVED BEACON
-  //   {
-  //     gpio_pin_toggle_dt(beaconRxSwitch);
-  //     err = DectPhy_Receive(PT_RX_HANDLE, US_TO_MODEM_TICKS(10000000), 0); // SCHEDULE RECEPTION OF DOWNLINK TRANSMISSION
-  //
-  //     DectBeaconMessage_t *beac = evt->data;
-  //     testctr = beac->ops_per_beacon;
-  //     LOG_WRN("BEACON RECEIVED %s num ops %d @ %llu. WAIT_FOR_BEACON -> DOWNLINK", beac->magic, beac->ops_per_beacon, modem_time);
-  //     ptState = PT_STATE_SCHEDULED_DOWNLINK;
-  //     testctr = DECT_OPS_PER_BEACON;
-  //   }
-  //   else 
-  //   {
-  //     err = DectPhy_Receive(BEACON_RX_HANDLE, US_TO_MODEM_TICKS(10000000), 0); // RECEIVED UNEXPECTED DATA WHILE WAITING FOR BEACON 
-  //   }
-  // }
-  // else if (ptState == PT_STATE_SCHEDULED_DOWNLINK) // RECEIVED DOWNLINK TRANSMISSION FROM FT
-  // {
-  //   gpio_pin_toggle_dt(ptDlSwitch);
-  //   err = DectPhy_TransmitHeadOfQueue(PT_TX_HANDLE, modem_time + rx_activeToIdleLatency + tx_idleToActiveLatency + 65 * DECT_GAP_TICK + DECT_GUARD_TIME);
-  //   ptState = PT_STATE_SCHEDULED_UPLINK;
-  //   LOG_WRN("DOWNLINK COMPLETE @ %llu. DOWNLINK -> UPLINK", modem_time);
-  //   LOG_HEXDUMP_WRN(evt->data, 16, "DOWNLINK RX");
-  //   k_sem_give(&done_sem);
-  // }
 }
 
 static void mock_complete(const struct nrf_modem_dect_phy_op_complete_event *evt)
@@ -219,12 +220,20 @@ static void mock_complete(const struct nrf_modem_dect_phy_op_complete_event *evt
     LOG_ERR("op_complete %s cb time %"PRIu64" status %x handle %d ", !IS_RX_HANDLE(evt->handle) ? "TX" : "RX", modem_time, evt->err, evt->handle);
   }
 
+  if (evt->handle == BEACON_LATCH_RX_HANDLE && ptState == PT_STATE_WAIT_FOR_LATCH_BEACON)
+  {
+    LOG_ERR("PT_STATE_WAIT_FOR_LATCH_BEACON TIMED OUT! FALLING BACK TO WAIT_FOR_BEACON");
+    ptState = PT_STATE_WAIT_FOR_BEACON; 
+    gpio_pin_toggle_dt(beaconRxSwitch);
+    k_sem_give(&done_sem);
+  }
+
   // if (evt->handle == PT_RX_HANDLE)
   // {
   //   LOG_WRN("RX TIMED OUT");
   //   gpio_pin_toggle_dt(ptDlSwitch);
   // }
-  k_sem_give(&done_sem);
+  // k_sem_give(&done_sem);
 
   if (ptState == PT_STATE_SCHEDULED_UPLINK && evt->handle == PT_TX_HANDLE)
   {
@@ -257,7 +266,7 @@ static void mock_complete(const struct nrf_modem_dect_phy_op_complete_event *evt
 
 static void print_pdc(const struct nrf_modem_dect_phy_pdc_event *evt) // TODO make this part as lean as possible. just copy over the bytes and let a thread do processing
 {
-  LOG_WRN("PRINT PDC DATA LEN %d %s", evt->len, evt->data);
+  LOG_WRN("PRINT PDC DATA LEN %d %s state %d", evt->len, evt->data, ptState);
 }
 
 // Currently we care for two kinds of events:
@@ -268,8 +277,8 @@ void Pt_HandleEvent(const struct nrf_modem_dect_phy_event *evt)
   if (evt->id == NRF_MODEM_DECT_PHY_EVT_PDC)
   {
     // on_pdc_pt(&evt->pdc);
-    // mock_pdc(&evt->pdc);
-    print_pdc(&evt->pdc);
+    mock_pdc(&evt->pdc);
+    // print_pdc(&evt->pdc);
     // LOG_ERR("PDC @ MT %llu. pcc delta %llu", modem_time, lastPdcModemTick - lastPccModemTick); // TODO REMOVE
   }
   else if (evt->id == NRF_MODEM_DECT_PHY_EVT_PCC)
@@ -313,8 +322,8 @@ void Pt_InfiniteLoop(void)
 
     LOG_ERR("PT LOOP BEGIN");
 
-    // err = DectPhy_Receive(BEACON_RX_HANDLE, US_TO_MODEM_TICKS(100000000), 0); // GET FAKE BEACON
-    DectPhy_ReceiveContinuous(PT_RX_HANDLE, US_TO_MODEM_TICKS(100000000), 0); // Get first beacon
+    err = DectPhy_Receive(BEACON_RX_HANDLE, US_TO_MODEM_TICKS(1000000000), 0); // GET FAKE BEACON
+    // DectPhy_ReceiveContinuous(PT_RX_HANDLE, US_TO_MODEM_TICKS(100000000), 0); // Get first beacon
     k_sem_take(&done_sem, K_FOREVER);
     
     LOG_ERR("DONE");

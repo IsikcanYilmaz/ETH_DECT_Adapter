@@ -22,10 +22,10 @@
 #define DECT_GAP_US (5) // ?
 #define DECT_GAP_TICK ((uint64_t) (DECT_GAP_US * NRF_MODEM_DECT_MODEM_TIME_TICK_RATE_KHZ) / 1000)
 
-#define DECT_GUARD_TIME (50 * DECT_GAP_TICK) // 5000 us
+#define DECT_GUARD_TIME (10 * DECT_GAP_TICK) // 5000 us
 
 // #define DECT_OPS_PER_BEACON 8 //164
-#define DECT_OPS_PER_BEACON 100 //164 // working
+#define DECT_OPS_PER_BEACON 12 //164 // working
 
 // #define DECT_MASTER_BEACON_PERIOD_TICK (10 * 24 * DECT_SLOT_DURATION_TICK) //(30 * 24 * DECT_SLOT_DURATION_TICK)
 #define DECT_MASTER_BEACON_PERIOD_TICK (20 * 24 * DECT_SLOT_DURATION_TICK) // working
@@ -50,6 +50,8 @@ typedef struct DectBeaconMessage_s
   char magic[4]; // 4
   uint16_t ops_per_beacon; // 2
   uint16_t guard_time; // 2
+  uint64_t this_beacon_time; // 8
+  uint64_t next_beacon_time; // 8
 } __attribute__((packed)) DectBeaconMessage_t;
 
 typedef struct DectTimesyncMessage_s
@@ -67,6 +69,7 @@ enum DectPtState_e
 {
   PT_STATE_IDLE,
   PT_STATE_WAIT_FOR_BEACON,
+  PT_STATE_WAIT_FOR_LATCH_BEACON,
   PT_STATE_SCHEDULED_DOWNLINK,
   PT_STATE_SCHEDULED_UPLINK,
   PT_STATE_FRAME_DONE,
@@ -93,6 +96,7 @@ enum DectOperationHandle_e
 {
   BEACON_TX_HANDLE = 0,
   BEACON_RX_HANDLE = 1,
+  BEACON_LATCH_RX_HANDLE = 2,
   FT_TX_HANDLE = 2000,
   FT_RX_HANDLE = 3000,
   PT_TX_HANDLE = 4000,

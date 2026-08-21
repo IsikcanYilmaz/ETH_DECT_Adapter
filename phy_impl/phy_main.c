@@ -278,16 +278,27 @@ int DectPhy_TransmitHeadOfQueueAndReceive(uint32_t handle_offset, uint64_t start
   int err;
   
   // Prep our payload
-  // struct DectInFlightPktStub_s *inFlight = k_malloc(sizeof(struct DectInFlightPktStub_s));
-  // if (inFlight == NULL)
-  // {
-  //   LOG_ERR("%s: oom cannot malloc", __FUNCTION__);
-  //   return -ENOMEM;
-  // }
-  // inFlight->handle = handle;
-  
-  static int testpayload = 0;
-  testpayload++;
+  struct DectInFlightPktStub_s *inFlight = k_malloc(sizeof(struct DectInFlightPktStub_s));
+  if (inFlight == NULL)
+  {
+    LOG_ERR("%s: oom cannot malloc", __FUNCTION__);
+    return -ENOMEM;
+  }
+
+  inFlight->handle = TX_COMBO_HANDLE + handle_offset;
+
+  struct LeanWiznet_Packet *pkt;
+  if (!k_queue_is_empty(&ethRxQueue))
+  {
+    pkt = (struct LeanWiznet_Packet *) k_queue_get(&ethRxQueue, K_FOREVER);
+    LOG_DBG("%d BYTES READ FROM ETH, SCHEDULED FOR TX AT %llu", pkt->size, start_time_tx);
+    inFlight->ptr = (void *) pkt;
+  }
+  else
+  {
+    LOG_DBG("NO PKT FROM ETH. SENDING BLANK TX");
+    inFlight->ptr = NULL;
+  }
   
   struct phy_ctrl_field_common header = {
     .header_format = 0x0,
@@ -311,8 +322,8 @@ int DectPhy_TransmitHeadOfQueueAndReceive(uint32_t handle_offset, uint64_t start
       .carrier = CONFIG_CARRIER,
       .lbt_period = 0,// NRF_MODEM_DECT_LBT_PERIOD_MAX, // JON EXPERIMENTAL
       .phy_header = (union nrf_modem_dect_phy_hdr *) &header,
-      .data = &testpayload, //"NONE", // TODO pull this from the head of queue
-      .data_size = 4,
+      .data = (inFlight->ptr) ? pkt->payload : "NONE", // TODO clean 
+      .data_size = (inFlight->ptr) ? pkt->size : 4,
     },
     .rx = {
       .start_time = start_time_rx,
@@ -332,6 +343,21 @@ int DectPhy_TransmitHeadOfQueueAndReceive(uint32_t handle_offset, uint64_t start
   };
 
   err = nrf_modem_dect_phy_tx_rx(&tx_rx_op_params);
+
+  if (err)
+  {
+    LOG_ERR("%s: transmission error");
+    if (inFlight->ptr)
+    {
+      k_free(inFlight->ptr);
+    }
+    k_free(inFlight);
+  }
+  else 
+  {
+    k_queue_append(&inFlightQueue, inFlight);
+  }
+
   return err;
 }
 
@@ -339,12 +365,15 @@ int DectPhy_TransmitHeadOfQueue(uint32_t handle, uint64_t start_time)
 {
   int err;
   struct DectInFlightPktStub_s *inFlight = k_malloc(sizeof(struct DectInFlightPktStub_s));
+  
   if (inFlight == NULL)
   {
     LOG_ERR("%s: oom cannot malloc", __FUNCTION__);
     return -ENOMEM;
   }
+
   inFlight->handle = handle;
+
   if (!k_queue_is_empty(&ethRxQueue))
   {
     struct LeanWiznet_Packet *pkt = (struct LeanWiznet_Packet *) k_queue_get(&ethRxQueue, K_FOREVER);
@@ -368,7 +397,6 @@ int DectPhy_TransmitHeadOfQueue(uint32_t handle, uint64_t start_time)
     }
     k_free(inFlight);
   }
-
   else 
   {
     k_queue_append(&inFlightQueue, inFlight);
@@ -379,6 +407,7 @@ int DectPhy_TransmitHeadOfQueue(uint32_t handle, uint64_t start_time)
 int DectPhy_TransmitBeacon(uint64_t start_time)
 {
   // TODO more in depth logic
+  beac.this_beacon_time = start_time;
   return DectPhy_Transmit(BEACON_TX_HANDLE, &beac, sizeof(DectBeaconMessage_t), start_time);
 }
 
