@@ -140,26 +140,25 @@ static void mock_pdc(const struct nrf_modem_dect_phy_pdc_event *evt) // TODO mak
 
       DectBeaconMessage_t *beac = evt->data;
       uint16_t ops_per_beacon = beac->ops_per_beacon;
-      uint64_t next_beacon_time_offset = ((2 * ops_per_beacon + 1) * opTransitionLatency) + (2 * ops_per_beacon * DECT_SLOT_DURATION_TICK);
+      uint64_t next_beacon_time_offset = ((2 * ops_per_beacon + 1) * opTransitionLatency) + (2 * ops_per_beacon * DECT_SLOT_DURATION_TICK) + (US_TO_MODEM_TICKS(800));
       uint64_t next_beacon_tick = modem_time + next_beacon_time_offset;
       uint64_t next_dl_tick = next_beacon_tick + DECT_SLOT_DURATION_TICK + opTransitionLatency;
       uint64_t next_ul_tick = next_dl_tick + DECT_SLOT_DURATION_TICK + opTransitionLatency;
       
       uint64_t ft_beacon_timestamp = beac->this_beacon_time;
       
-      
       /*
        * we should latch to the next beacon
        */
 
-      err = DectPhy_Receive(BEACON_LATCH_RX_HANDLE, DECT_SLOT_DURATION_TICK + 7 * DECT_GUARD_TIME, next_beacon_tick);
-      err = DectPhy_Receive(PT_RX_HANDLE, DECT_SLOT_DURATION_TICK, next_dl_tick);
+      err = DectPhy_Receive(BEACON_LATCH_RX_HANDLE, DECT_SLOT_DURATION_TICK, next_beacon_tick);
+      // err = DectPhy_Receive(PT_RX_HANDLE, DECT_SLOT_DURATION_TICK, next_dl_tick);
       // err = DectPhy_ReceiveContinuous(BEACON_LATCH_RX_HANDLE, US_TO_MODEM_TICKS(1000 * 30), 0);
       // err = DectPhy_Receive(BEACON_LATCH_RX_HANDLE, 2 * DECT_SLOT_DURATION_TICK, next_beacon_tick);
       gpio_pin_toggle_dt(beaconRxSwitch);
       ptState = PT_STATE_TEST;
       // ptState = PT_STATE_WAIT_FOR_LATCH_BEACON;
-      LOG_WRN("BEACON RECEIVED. BEAC TS %llu MY TS %llu ", ft_beacon_timestamp, modem_time);
+      LOG_WRN("BEACON RECEIVED. BEAC TS %llu MY TS %llu %d BYTES", ft_beacon_timestamp, modem_time, evt->len);
       LOG_HEXDUMP_WRN(beac, 32, "BEAC");
       LOG_WRN("BEACON RECEIVED WAITING FOR LATCH BEACON AFTER %d OPS", 2 * ops_per_beacon);
       LOG_WRN("EXPECTING NEXT BEACON IN %llu TICKS, AT MY TIME %llu", next_beacon_time_offset, next_beacon_tick);
@@ -183,6 +182,7 @@ static void mock_pdc(const struct nrf_modem_dect_phy_pdc_event *evt) // TODO mak
     if (DectPhy_PktIsBeacon(evt->data))
     {
       DectBeaconMessage_t *beac = evt->data;
+      LOG_WRN("BEAC %d BYTES", evt->len);
       LOG_WRN("BEAC TS %llu MY TS %llu", beac->this_beacon_time, modem_time);
       LOG_WRN("BEAC TS DELTA %llu", beac->this_beacon_time - beacon_time);
       LOG_WRN("MY TS DELTA %llu", modem_time - my_time_at_beacon);
@@ -225,10 +225,14 @@ static void mock_complete(const struct nrf_modem_dect_phy_op_complete_event *evt
 
   if (evt->err)
   {
-    LOG_ERR("op_complete %s cb time %"PRIu64" status %x handle %d ", !IS_RX_HANDLE(evt->handle) ? "TX" : "RX", modem_time, evt->err, evt->handle);
+    LOG_ERR("op_complete %s cb time %"PRIu64" status %x handle %d ", 
+        !IS_RX_HANDLE(evt->handle) ? "TX" : "RX", 
+        modem_time, 
+        evt->err, 
+        evt->handle);
   }
 
-  if (evt->handle == BEACON_LATCH_RX_HANDLE && ptState == PT_STATE_WAIT_FOR_LATCH_BEACON)
+  if (evt->handle == BEACON_LATCH_RX_HANDLE && ptState == PT_STATE_TEST)
   {
     LOG_ERR("PT_STATE_WAIT_FOR_LATCH_BEACON TIMED OUT! FALLING BACK TO WAIT_FOR_BEACON");
     ptState = PT_STATE_WAIT_FOR_BEACON; 

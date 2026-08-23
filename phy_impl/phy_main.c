@@ -47,7 +47,7 @@ uint32_t tx_activeToIdleLatency;
 uint32_t rx_idleToActiveLatency;
 uint32_t rx_activeToIdleLatency;
 
-DectBeaconMessage_t beac;
+DectBeaconMessage_t master_beacon;
 
 volatile enum DectPtState_e ptState = PT_STATE_IDLE;
 volatile enum DectFtState_e ftState = FT_STATE_IDLE;
@@ -406,36 +406,54 @@ int DectPhy_TransmitHeadOfQueue(uint32_t handle, uint64_t start_time)
 
 int DectPhy_TransmitBeacon(uint64_t start_time)
 {
+  int err; 
   // TODO more in depth logic
-  beac.this_beacon_time = start_time;
+  master_beacon.this_beacon_time = start_time;
+  uint32_t expected_next_beacon_offset = DECT_SLOT_DURATION_TICK + (2 * DECT_OPS_PER_BEACON + 1) * (DECT_SLOT_DURATION_TICK + opTransitionLatency);
+  master_beacon.modem_ticks_until_next_beacon = expected_next_beacon_offset;
+
+  static int ctr = 10;
+  static uint64_t ts;
+  if (ctr > 0)
+  {
+    LOG_WRN("BEAC @ %llu TIXUNTIL %i. DIFF %d . DIFFEXP %i", modem_time, expected_next_beacon_offset, modem_time - ts, (modem_time - ts) - (uint64_t) expected_next_beacon_offset);
+    ctr--;
+    ts = modem_time;
+  }
 
   // TODO make these generic, reuse
-  // struct phy_ctrl_field_common header = {
-  //   .header_format = 0x0,
-  //   .packet_length_type = DECT_PACKET_LENGTH_SLOT,
-  //   .packet_length = 0x00,
-  //   .short_network_id = (CONFIG_APP_NETWORK_ID & 0xff),
-  //   .transmitter_id_hi = (device_id >> 8),
-  //   .transmitter_id_lo = (device_id & 0xff),
-  //   .transmit_power = CONFIG_APP_TX_POWER,
-  //   .reserved = 0,
-  //   .df_mcs = knobs.mcs,
-  // };
-  //
-  // struct nrf_modem_dect_phy_tx_params tx_op_params = {
-  //   .start_time = start_time,
-  //   .handle = handle,
-  //   .network_id = CONFIG_APP_NETWORK_ID,
-  //   .phy_type = 0,
-  //   .lbt_rssi_threshold_max = 0,
-  //   .carrier = CONFIG_CARRIER,
-  //   .lbt_period = 0,// NRF_MODEM_DECT_LBT_PERIOD_MAX, // JON EXPERIMENTAL
-  //   .phy_header = (union nrf_modem_dect_phy_hdr *) &header,
-  //   .data = data,
-  //   .data_size = data_len,
-  // };
+  struct phy_ctrl_field_common header = {
+    .header_format = 0x0,
+    .packet_length_type = DECT_PACKET_LENGTH_SLOT,
+    .packet_length = 0x00,
+    .short_network_id = (CONFIG_APP_NETWORK_ID & 0xff),
+    .transmitter_id_hi = (device_id >> 8),
+    .transmitter_id_lo = (device_id & 0xff),
+    .transmit_power = CONFIG_APP_TX_POWER,
+    .reserved = 0,
+    .df_mcs = knobs.mcs,
+  };
 
-  return DectPhy_Transmit(BEACON_TX_HANDLE, &beac, sizeof(DectBeaconMessage_t), start_time);
+  struct nrf_modem_dect_phy_tx_params beacon_op_params = {
+    .start_time = start_time,
+    .handle = BEACON_TX_HANDLE,
+    .network_id = CONFIG_APP_NETWORK_ID,
+    .phy_type = 0,
+    .lbt_rssi_threshold_max = 0,
+    .carrier = CONFIG_CARRIER,
+    .lbt_period = 0,// NRF_MODEM_DECT_LBT_PERIOD_MAX, // JON EXPERIMENTAL
+    .phy_header = (union nrf_modem_dect_phy_hdr *) &header,
+    .data = &master_beacon,
+    .data_size = sizeof(DectBeaconMessage_t),
+  };
+
+  err = nrf_modem_dect_phy_tx(&beacon_op_params);
+	if (err != 0) {
+		return err;
+	}
+
+  return 0;
+  // return DectPhy_Transmit(BEACON_TX_HANDLE, &beac, sizeof(DectBeaconMessage_t), start_time);
 }
 
 // enqueue packets here to send them over the ethernet connection
@@ -541,16 +559,18 @@ static void on_latency_info_get(const struct nrf_modem_dect_phy_latency_info_eve
             opTransitionLatency, opStartupLatency, tx_idleToActiveLatency, tx_activeToIdleLatency, rx_idleToActiveLatency, rx_activeToIdleLatency,
             modem_time, k_uptime_ticks(), (uint64_t)(NRF_MODEM_DECT_MODEM_TIME_TICK_RATE_KHZ), (uint64_t) (CONFIG_SYS_CLOCK_TICKS_PER_SEC / 1000));
 
-    genericBeaconScheduleOffset = DECT_MASTER_BEACON_PERIOD_TICK; // Currently unused
-    genericTxScheduleOffset = tx_activeToIdleLatency + rx_idleToActiveLatency + DECT_SLOT_DURATION_TICK + rx_activeToIdleLatency + (10 * DECT_GAP_TICK);
-    genericRxScheduleOffset = rx_activeToIdleLatency + tx_idleToActiveLatency + DECT_SLOT_DURATION_TICK + rx_activeToIdleLatency + (65 * DECT_GAP_TICK);
-    genericRxDuration = DECT_SLOT_DURATION_TICK + 30 * DECT_GAP_TICK;
-
-    genericRelativeRxSchedule = opTransitionLatency + 3 * DECT_GAP_TICK;
-
-    genericTxScheduleOffset += DECT_GUARD_TIME;
-    genericRxScheduleOffset += DECT_GUARD_TIME;
-    genericRxDuration += DECT_GUARD_TIME;
+    // genericBeaconScheduleOffset = DECT_MASTER_BEACON_PERIOD_TICK; // Currently unused
+    // genericTxScheduleOffset = tx_activeToIdleLatency + rx_idleToActiveLatency + DECT_SLOT_DURATION_TICK + rx_activeToIdleLatency + (10 * DECT_GAP_TICK);
+    // genericRxScheduleOffset = rx_activeToIdleLatency + tx_idleToActiveLatency + DECT_SLOT_DURATION_TICK + rx_activeToIdleLatency + (65 * DECT_GAP_TICK);
+    // genericRxDuration = DECT_SLOT_DURATION_TICK + 30 * DECT_GAP_TICK;
+    //
+    // genericRelativeRxSchedule = opTransitionLatency + 3 * DECT_GAP_TICK;
+    //
+    // genericTxScheduleOffset += DECT_GUARD_TIME;
+    // genericRxScheduleOffset += DECT_GUARD_TIME;
+    // genericRxDuration += DECT_GUARD_TIME;
+    genericTxScheduleOffset = DECT_SLOT_DURATION_TICK + opTransitionLatency;
+    genericRelativeRxSchedule = opTransitionLatency;
   }
   k_sem_give(&operation_sem);
 }
@@ -789,8 +809,8 @@ void DectPhy_Main(bool master)
   int err;
   iAmFt = master;
 
-  sprintf(beac.magic, "BEAC"); 
-  beac.ops_per_beacon = DECT_OPS_PER_BEACON;
+  sprintf(master_beacon.magic, "BEAC"); 
+  master_beacon.ops_per_beacon = DECT_OPS_PER_BEACON;
 
   if (iAmFt) // TODO currently these dont do anythying
   {

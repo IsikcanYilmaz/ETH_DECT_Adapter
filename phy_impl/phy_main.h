@@ -27,7 +27,7 @@
 #define DECT_GUARD_TIME (10 * DECT_GAP_TICK) // 5000 us
 
 // #define DECT_OPS_PER_BEACON 8 //164
-#define DECT_OPS_PER_BEACON 4 //164 // working
+#define DECT_OPS_PER_BEACON 20 //164 // working
 
 // #define DECT_MASTER_BEACON_PERIOD_TICK (10 * 24 * DECT_SLOT_DURATION_TICK) //(30 * 24 * DECT_SLOT_DURATION_TICK)
 #define DECT_MASTER_BEACON_PERIOD_TICK (20 * 24 * DECT_SLOT_DURATION_TICK) // working
@@ -50,10 +50,10 @@ typedef struct DectPacket_s
 typedef struct DectBeaconMessage_s
 {
   char magic[4]; // 4
-  uint16_t ops_per_beacon; // 2
-  uint16_t guard_time; // 2
+  uint16_t ops_per_beacon; // 2 // TODO either this or ticks until next should go
   uint64_t this_beacon_time; // 8
-  uint64_t next_beacon_time; // 8
+  uint32_t modem_ticks_until_next_beacon; // 4 // NOTE since 32bit, it supports 62.13 seconds max
+                                          // tbh the pt could infer this by itself also but idk
 } __attribute__((packed)) DectBeaconMessage_t;
 
 typedef struct DectTimesyncMessage_s

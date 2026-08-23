@@ -178,10 +178,20 @@ static void mock_complete(const struct nrf_modem_dect_phy_op_complete_event *evt
   int err;
   int64_t diff;
 
+
   if (evt->err) /////////////////////////////////////// MODEM ERROR //////////////////////
   {
     LOG_ERR("%s ERROR %x HANDLE %d @ MT %llu", __FUNCTION__, evt->err, evt->handle, modem_time);
     return;
+  }
+  
+  static int printcount = 60;
+  static uint64_t lastopcomplete = 0;
+  if (printcount)
+  {
+    // LOG_WRN("OP %d COMPLETE @ %llu Diff %llu ", evt->handle, modem_time, modem_time - lastopcomplete);
+    lastopcomplete = modem_time;
+    printcount--;
   }
 
   if (evt->handle == BEACON_TX_HANDLE) /////////////////////////////////////// BEAC ///////////////////////////////////////
