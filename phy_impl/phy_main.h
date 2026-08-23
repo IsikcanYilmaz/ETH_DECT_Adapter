@@ -27,7 +27,7 @@
 #define DECT_GUARD_TIME (10 * DECT_GAP_TICK) // 5000 us
 
 // #define DECT_OPS_PER_BEACON 8 //164
-#define DECT_OPS_PER_BEACON 20 //164 // working
+#define DECT_OPS_PER_BEACON 8 //164 // working
 
 // #define DECT_MASTER_BEACON_PERIOD_TICK (10 * 24 * DECT_SLOT_DURATION_TICK) //(30 * 24 * DECT_SLOT_DURATION_TICK)
 #define DECT_MASTER_BEACON_PERIOD_TICK (20 * 24 * DECT_SLOT_DURATION_TICK) // working
@@ -151,6 +151,16 @@ extern uint32_t tx_idleToActiveLatency;
 extern uint32_t tx_activeToIdleLatency;
 extern uint32_t rx_idleToActiveLatency;
 extern uint32_t rx_activeToIdleLatency;
+
+extern uint32_t blockTicks; // 1 SLOT TICKS + 1 op Trans
+
+extern volatile uint64_t lastBeaconCplt;
+extern volatile uint64_t lastTxCplt;
+extern volatile uint64_t lastRxCplt;
+
+extern volatile uint64_t beaconDelta; // Counted at the ends of operations
+extern volatile uint64_t txDelta; // Counted at the ends of operations only when counter is > 1
+extern volatile uint64_t rxDelta;
 
 extern uint64_t genericBeaconScheduleOffset;
 extern uint64_t genericTxScheduleOffset;

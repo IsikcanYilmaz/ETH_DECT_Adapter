@@ -47,6 +47,16 @@ uint32_t tx_activeToIdleLatency;
 uint32_t rx_idleToActiveLatency;
 uint32_t rx_activeToIdleLatency;
 
+uint32_t blockTicks; // 1 SLOT TICKS + 1 op Trans
+
+volatile uint64_t lastBeaconCplt = 0;
+volatile uint64_t lastTxCplt = 0;
+volatile uint64_t lastRxCplt = 0;
+
+volatile uint64_t beaconDelta = 0; // Counted at the ends of operations
+volatile uint64_t txDelta = 0; // Counted at the ends of operations only when counter is > 1
+volatile uint64_t rxDelta = 0;
+
 DectBeaconMessage_t master_beacon;
 
 volatile enum DectPtState_e ptState = PT_STATE_IDLE;
@@ -409,14 +419,15 @@ int DectPhy_TransmitBeacon(uint64_t start_time)
   int err; 
   // TODO more in depth logic
   master_beacon.this_beacon_time = start_time;
-  uint32_t expected_next_beacon_offset = DECT_SLOT_DURATION_TICK + (2 * DECT_OPS_PER_BEACON + 1) * (DECT_SLOT_DURATION_TICK + opTransitionLatency);
+  uint32_t expected_next_beacon_offset = (uint32_t) beaconDelta; // TODO bad solution but will do. basically we're just sending the delta in ticks, between this xmit and the previous one. it worked
   master_beacon.modem_ticks_until_next_beacon = expected_next_beacon_offset;
 
   static int ctr = 10;
   static uint64_t ts;
   if (ctr > 0)
   {
-    LOG_WRN("BEAC @ %llu TIXUNTIL %i. DIFF %d . DIFFEXP %i", modem_time, expected_next_beacon_offset, modem_time - ts, (modem_time - ts) - (uint64_t) expected_next_beacon_offset);
+    LOG_WRN("Beacon @ %llu. Next expected at %llu", start_time, start_time + beaconDelta);
+    LOG_WRN("Beacondelta %llu txdelta %llu rxdelta %llu", beaconDelta, txDelta, rxDelta);
     ctr--;
     ts = modem_time;
   }
@@ -424,7 +435,7 @@ int DectPhy_TransmitBeacon(uint64_t start_time)
   // TODO make these generic, reuse
   struct phy_ctrl_field_common header = {
     .header_format = 0x0,
-    .packet_length_type = DECT_PACKET_LENGTH_SLOT,
+    .packet_length_type = DECT_PACKET_LENGTH_SUBSLOT,
     .packet_length = 0x00,
     .short_network_id = (CONFIG_APP_NETWORK_ID & 0xff),
     .transmitter_id_hi = (device_id >> 8),

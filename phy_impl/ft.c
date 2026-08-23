@@ -198,14 +198,20 @@ static void mock_complete(const struct nrf_modem_dect_phy_op_complete_event *evt
   {
     gpio_pin_toggle_dt(beaconTxSwitch);
 
+    beaconDelta = modem_time - lastBeaconCplt; 
+    lastBeaconCplt = modem_time;
+
     // LOG_WRN("%s @ MT: %llu HANDLE BEACON (%lli)", __FUNCTION__, modem_time, beaconExpEnding - modem_time);
   }
   else if (IS_TX_HANDLE(evt->handle)) /////////////////////////////////////// TX ///////////////////////////////////////
   {
     gpio_pin_toggle_dt(dlSwitch);
+
     testctr--;
     if (testctr) // OPS PER BEACON NOT DONE 
     {
+      txDelta = modem_time - lastTxCplt;
+      lastTxCplt = modem_time;
       err = DectPhy_TransmitHeadOfQueueAndReceive(testctr, 
                                                   modem_time + DECT_SLOT_DURATION_TICK + 2 * opTransitionLatency,
                                                   genericRelativeRxSchedule, 
@@ -213,10 +219,10 @@ static void mock_complete(const struct nrf_modem_dect_phy_op_complete_event *evt
     }
     else // OPS PER BEACON DONE
     {
-      // return; // TODO Remove 
+      // return; // TODO remove   
       testctr = DECT_OPS_PER_BEACON;
       beaconSchedule = modem_time + DECT_SLOT_DURATION_TICK + 2 * opTransitionLatency;
-      dlSchedule = beaconSchedule + DECT_SLOT_DURATION_TICK + 2 * opTransitionLatency;
+      dlSchedule = beaconSchedule + DECT_SLOT_DURATION_TICK + 1 * opTransitionLatency;
       err = DectPhy_TransmitBeacon(beaconSchedule);
       err = DectPhy_TransmitHeadOfQueueAndReceive(testctr, 
                                                   dlSchedule, 
@@ -229,6 +235,9 @@ static void mock_complete(const struct nrf_modem_dect_phy_op_complete_event *evt
   else if (IS_RX_HANDLE(evt->handle)) /////////////////////////////////////// RX ///////////////////////////////////////
   {
     gpio_pin_toggle_dt(ulSwitch);
+    rxDelta = modem_time - lastRxCplt;
+    lastRxCplt = modem_time;
+    
     // LOG_ERR("%s @ MT: %llu HANDLE ULRX (%lli). %llu - %llu", __FUNCTION__, modem_time, diff, nextUlRxModemTick, nextUlRxModemTick + DECT_SLOT_DURATION_TICK);
   }
 
@@ -244,13 +253,17 @@ static void mock_time_get(const struct nrf_modem_dect_phy_time_get_event *evt)
   if (!warmedUp)
   {
     int err;
-    base = modem_time + 500 * DECT_SLOT_DURATION_TICK;
-    genericTxScheduleOffset = DECT_SLOT_DURATION_TICK + opTransitionLatency;
+    blockTicks = DECT_SLOT_DURATION_TICK + opTransitionLatency;
+
+    base = modem_time + 10000 * DECT_SLOT_DURATION_TICK;
+    genericTxScheduleOffset = DECT_SLOT_DURATION_TICK + opTransitionLatency +  US_TO_MODEM_TICKS(100);
     genericRelativeRxSchedule = opTransitionLatency;
 
     dlSchedule = base + genericTxScheduleOffset;
 
     genericRxDuration = DECT_SLOT_DURATION_TICK;
+
+    LOG_WRN("SANITY TEST 1 : FIRST BEACON WILL GO AT %llu , SECOND WILL BE %d TICKS AWAY FROM IT, AT @ %llu", base, (1 + (DECT_OPS_PER_BEACON * 2)) * blockTicks, base + (1 + (DECT_OPS_PER_BEACON * 2)) * blockTicks);
 
     // genericTxScheduleOffset = DECT_SLOT_DURATION_TICK + opTransitionLatency;
     err = DectPhy_TransmitBeacon(base);
