@@ -214,8 +214,9 @@ static void mock_complete(const struct nrf_modem_dect_phy_op_complete_event *evt
     {
       txDelta = modem_time - lastTxCplt;
       lastTxCplt = modem_time;
+      dlSchedule = modem_time + DECT_SLOT_DURATION_TICK + 2 * opTransitionLatency + DECT_HEADROOM;
       err = DectPhy_TransmitHeadOfQueueAndReceive(slotCounter, 
-                                                  modem_time + DECT_SLOT_DURATION_TICK + 2 * opTransitionLatency,
+                                                  dlSchedule,
                                                   genericRelativeRxSchedule, 
                                                   genericRxDuration);
     }
@@ -223,8 +224,8 @@ static void mock_complete(const struct nrf_modem_dect_phy_op_complete_event *evt
     {
       // return; // TODO remove   
       slotCounter = DECT_OPS_PER_BEACON;
-      beaconSchedule = modem_time + DECT_SLOT_DURATION_TICK + 2 * opTransitionLatency;
-      dlSchedule = beaconSchedule + DECT_SLOT_DURATION_TICK + 1 * opTransitionLatency;
+      beaconSchedule = modem_time + DECT_SLOT_DURATION_TICK + 2 * opTransitionLatency + DECT_HEADROOM;
+      dlSchedule = beaconSchedule + DECT_SLOT_DURATION_TICK + opTransitionLatency + DECT_HEADROOM;
       err = DectPhy_TransmitBeacon(beaconSchedule);
       err = DectPhy_TransmitHeadOfQueueAndReceive(slotCounter, 
                                                   dlSchedule, 
@@ -255,15 +256,20 @@ static void mock_time_get(const struct nrf_modem_dect_phy_time_get_event *evt)
   if (!warmedUp)
   {
     int err;
-    blockTicks = DECT_SLOT_DURATION_TICK + opTransitionLatency;
+    blockTicks = DECT_SLOT_DURATION_TICK + opTransitionLatency + DECT_HEADROOM;
 
     base = modem_time + 10000 * DECT_SLOT_DURATION_TICK;
-    genericTxScheduleOffset = DECT_SLOT_DURATION_TICK + opTransitionLatency +  US_TO_MODEM_TICKS(100);
+
+    genericTxScheduleOffset = DECT_SLOT_DURATION_TICK + opTransitionLatency + DECT_HEADROOM;
     genericRelativeRxSchedule = opTransitionLatency;
 
     dlSchedule = base + genericTxScheduleOffset;
 
-    genericRxDuration = DECT_SLOT_DURATION_TICK;
+    genericRxDuration = DECT_SLOT_DURATION_TICK + DECT_HEADROOM;
+
+    LOG_WRN("genericTxScheduleOffset: %llu\ndlSchedule: %llu\ngenericRxDuration: %llu\nheadroom: %llu\nblock: %llu\n", genericTxScheduleOffset, dlSchedule, genericRxDuration, DECT_HEADROOM, blockTicks);
+
+    // Notes to self: genericRxDuration, genericRelativeRxSchedule, dlSchedule, 
 
     LOG_WRN("SANITY TEST 1 : FIRST BEACON WILL GO AT %llu , SECOND WILL BE %d TICKS AWAY FROM IT, AT @ %llu", base, (1 + (DECT_OPS_PER_BEACON * 2)) * blockTicks, base + (1 + (DECT_OPS_PER_BEACON * 2)) * blockTicks);
 

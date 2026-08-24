@@ -586,8 +586,8 @@ static void on_latency_info_get(const struct nrf_modem_dect_phy_latency_info_eve
     // genericTxScheduleOffset += DECT_GUARD_TIME;
     // genericRxScheduleOffset += DECT_GUARD_TIME;
     // genericRxDuration += DECT_GUARD_TIME;
-    genericTxScheduleOffset = DECT_SLOT_DURATION_TICK + opTransitionLatency;
-    genericRelativeRxSchedule = opTransitionLatency;
+    // genericTxScheduleOffset = DECT_SLOT_DURATION_TICK + opTransitionLatency;
+    // genericRelativeRxSchedule = opTransitionLatency;
   }
   k_sem_give(&operation_sem);
 }
