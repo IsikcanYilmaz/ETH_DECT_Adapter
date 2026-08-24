@@ -55,14 +55,14 @@ static void mock_pdc(const struct nrf_modem_dect_phy_pdc_event *evt) // TODO mak
       slotCounter = beac->ops_per_beacon;
 
       err = DectPhy_Receive(BEACON_LATCH_RX_HANDLE, DECT_SLOT_DURATION_TICK, next_beacon_tick);
-      err = DectPhy_Receive(PT_RX_HANDLE + slotCounter, DECT_SLOT_DURATION_TICK, next_beacon_tick + DECT_SLOT_DURATION_TICK + opTransitionLatency + DECT_HEADROOM);
+      err = DectPhy_Receive(PT_RX_HANDLE + slotCounter, DECT_SLOT_DURATION_TICK + DECT_HEADROOM, next_beacon_tick + DECT_SLOT_DURATION_TICK + opTransitionLatency + DECT_HEADROOM);
       err = DectPhy_Transmit(PT_TX_HANDLE + slotCounter, firstbuf, 8, next_beacon_tick + 2 * (DECT_SLOT_DURATION_TICK + opTransitionLatency + DECT_HEADROOM));
 
       slotCounter--;
       
       // err = DectPhy_ReceiveContinuous(PT_RX_HANDLE + 99, US_TO_MODEM_TICKS(1000000), next_beacon_tick + 4 * (DECT_SLOT_DURATION_TICK + opTransitionLatency));
 
-      err = DectPhy_Receive(PT_RX_HANDLE + slotCounter, DECT_SLOT_DURATION_TICK, next_beacon_tick + 3 * (DECT_SLOT_DURATION_TICK + opTransitionLatency + DECT_HEADROOM));
+      err = DectPhy_Receive(PT_RX_HANDLE + slotCounter, DECT_SLOT_DURATION_TICK + DECT_HEADROOM, next_beacon_tick + 3 * (DECT_SLOT_DURATION_TICK + opTransitionLatency + DECT_HEADROOM));
       err = DectPhy_Transmit(PT_TX_HANDLE + slotCounter, secondbuf, 8, next_beacon_tick + 4 * (DECT_SLOT_DURATION_TICK + opTransitionLatency + DECT_HEADROOM));
       
       LOG_WRN("@ %llu FIRST BEACON RECEIVED. %d BYTES. %d OPS PER BEACON", modem_time, evt->len, slotCounter);
@@ -71,7 +71,8 @@ static void mock_pdc(const struct nrf_modem_dect_phy_pdc_event *evt) // TODO mak
       LOG_WRN("NOW %llu LATCH SCH %llu DL SCH %llu UL SCH %llu", modem_time, next_beacon_tick, next_beacon_tick + DECT_SLOT_DURATION_TICK + opTransitionLatency + DECT_HEADROOM, next_beacon_tick + 2 * (DECT_SLOT_DURATION_TICK + opTransitionLatency + DECT_HEADROOM));
 
       gpio_pin_toggle_dt(beaconRxSwitch);
-      ptState = PT_STATE_WAIT_FOR_LATCH_BEACON;
+      // ptState = PT_STATE_WAIT_FOR_LATCH_BEACON; 
+      ptState = PT_STATE_TEST;
 
       expected_latch_beacon_time = next_beacon_tick;
     }
@@ -80,6 +81,11 @@ static void mock_pdc(const struct nrf_modem_dect_phy_pdc_event *evt) // TODO mak
       err = DectPhy_Receive(BEACON_RX_HANDLE, US_TO_MODEM_TICKS(1000000000), 0); // Unexpected non beacon
       LOG_DBG("NON BEACON", err); 
     }
+  }
+  else if (ptState == PT_STATE_TEST)
+  {
+    LOG_WRN("HANDLE %d", evt->handle);
+    LOG_HEXDUMP_WRN(evt->data, 16, "TEST");
   }
   else if (ptState == PT_STATE_WAIT_FOR_LATCH_BEACON)
   {
