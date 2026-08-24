@@ -322,6 +322,8 @@ int DectPhy_TransmitHeadOfQueueAndReceive(uint32_t handle_offset, uint64_t start
     .df_mcs = knobs.mcs,
   };
 
+  char testpayload[8] = {'t', 'e', 's', 't', (uint8_t) slotCounter};
+
   struct nrf_modem_dect_phy_tx_rx_params tx_rx_op_params = {
     .tx = {
       .start_time = start_time_tx,
@@ -332,8 +334,12 @@ int DectPhy_TransmitHeadOfQueueAndReceive(uint32_t handle_offset, uint64_t start
       .carrier = CONFIG_CARRIER,
       .lbt_period = 0,// NRF_MODEM_DECT_LBT_PERIOD_MAX, // JON EXPERIMENTAL
       .phy_header = (union nrf_modem_dect_phy_hdr *) &header,
-      .data = (inFlight->ptr) ? pkt->payload : "NONE", // TODO clean 
-      .data_size = (inFlight->ptr) ? pkt->size : 4,
+      
+      // .data = (inFlight->ptr) ? pkt->payload : "NONE", // TODO clean  // TODO UNCOMMENT AFTER TESTING
+      // .data_size = (inFlight->ptr) ? pkt->size : 4,
+
+      .data = (inFlight->ptr) ? pkt->payload : &testpayload, // TODO clean 
+      .data_size = (inFlight->ptr) ? pkt->size : 6,
     },
     .rx = {
       .start_time = start_time_rx,

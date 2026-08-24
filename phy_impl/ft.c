@@ -141,12 +141,17 @@ static void on_pcc_ft(const struct nrf_modem_dect_phy_pcc_event *evt)
 
 static void mock_pdc(const struct nrf_modem_dect_phy_pdc_event *evt) 
 {
-  LOG_WRN("PDC %s @ %llu", evt->data, modem_time);
+  // LOG_WRN("PDC %s @ %llu", evt->data, modem_time);
+  LOG_HEXDUMP_WRN(evt->data, 16, "PDC");
 }
 
 static void mock_pcc(const struct nrf_modem_dect_phy_pcc_event *evt) 
 {
-  LOG_WRN("PCC %d @ %llu", evt->header_status, modem_time);
+  if (evt->header_status)
+  {
+    LOG_ERR("PCC %d @ %llu", evt->header_status, modem_time);
+  }
+  LOG_DBG("PCC %d @ %llu", evt->header_status, modem_time);
 }
 
 
@@ -171,13 +176,10 @@ uint64_t rxDuration;
 uint64_t nextDlTxModemTick;
 uint64_t nextUlRxModemTick;
 
-static volatile int testctr = DECT_OPS_PER_BEACON;
-
 static void mock_complete(const struct nrf_modem_dect_phy_op_complete_event *evt)
 {
   int err;
   int64_t diff;
-
 
   if (evt->err) /////////////////////////////////////// MODEM ERROR //////////////////////
   {
@@ -207,12 +209,12 @@ static void mock_complete(const struct nrf_modem_dect_phy_op_complete_event *evt
   {
     gpio_pin_toggle_dt(dlSwitch);
 
-    testctr--;
-    if (testctr) // OPS PER BEACON NOT DONE 
+    slotCounter--;
+    if (slotCounter) // OPS PER BEACON NOT DONE 
     {
       txDelta = modem_time - lastTxCplt;
       lastTxCplt = modem_time;
-      err = DectPhy_TransmitHeadOfQueueAndReceive(testctr, 
+      err = DectPhy_TransmitHeadOfQueueAndReceive(slotCounter, 
                                                   modem_time + DECT_SLOT_DURATION_TICK + 2 * opTransitionLatency,
                                                   genericRelativeRxSchedule, 
                                                   genericRxDuration);
@@ -220,11 +222,11 @@ static void mock_complete(const struct nrf_modem_dect_phy_op_complete_event *evt
     else // OPS PER BEACON DONE
     {
       // return; // TODO remove   
-      testctr = DECT_OPS_PER_BEACON;
+      slotCounter = DECT_OPS_PER_BEACON;
       beaconSchedule = modem_time + DECT_SLOT_DURATION_TICK + 2 * opTransitionLatency;
       dlSchedule = beaconSchedule + DECT_SLOT_DURATION_TICK + 1 * opTransitionLatency;
       err = DectPhy_TransmitBeacon(beaconSchedule);
-      err = DectPhy_TransmitHeadOfQueueAndReceive(testctr, 
+      err = DectPhy_TransmitHeadOfQueueAndReceive(slotCounter, 
                                                   dlSchedule, 
                                                   genericRelativeRxSchedule, 
                                                   genericRxDuration);
@@ -267,7 +269,7 @@ static void mock_time_get(const struct nrf_modem_dect_phy_time_get_event *evt)
 
     // genericTxScheduleOffset = DECT_SLOT_DURATION_TICK + opTransitionLatency;
     err = DectPhy_TransmitBeacon(base);
-    err = DectPhy_TransmitHeadOfQueueAndReceive(testctr, dlSchedule, genericRelativeRxSchedule, genericRxDuration); // note that here and only here we use the non generic dlSchedule time. just to start things off
+    err = DectPhy_TransmitHeadOfQueueAndReceive(slotCounter, dlSchedule, genericRelativeRxSchedule, genericRxDuration); // note that here and only here we use the non generic dlSchedule time. just to start things off
     
     warmedUp = true;
     k_sem_give(&time_sem);
@@ -308,7 +310,7 @@ void Ft_Init(void)
 {
   // DectPhy_Transmit(GARBAGE_HANDLE, "GARBAGE", 7, 0); // TODO For some reason, the Very first transmission contains garbage data. maybe the buffer needs flushing somehow. this does that. awful solution replace it
   // k_sem_take(&operation_sem, K_FOREVER);
-
+  slotCounter = DECT_OPS_PER_BEACON;
 }
 
 void Ft_InfiniteLoop(void)

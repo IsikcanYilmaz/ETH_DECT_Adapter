@@ -24,7 +24,7 @@
 #define DECT_GAP_US (5) // ?
 #define DECT_GAP_TICK ((uint64_t) (DECT_GAP_US * NRF_MODEM_DECT_MODEM_TIME_TICK_RATE_KHZ) / 1000)
 
-#define DECT_GUARD_TIME (10 * DECT_GAP_TICK) // 5000 us
+#define DECT_GUARD_TIME (100 * DECT_GAP_TICK) // 500 us
 
 // #define DECT_OPS_PER_BEACON 8 //164
 #define DECT_OPS_PER_BEACON 8 //164 // working
