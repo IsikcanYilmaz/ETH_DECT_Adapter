@@ -115,7 +115,6 @@ struct LeanWiznet_runtime {
 	struct k_sem int_sem;
   struct k_mutex spi_mutex;
 	struct phy_link_state state;
-	uint8_t buf[1500]; // JON pound define
 };
 
 struct LeanWiznet_Packet{

@@ -26,7 +26,7 @@
 
 #define DT_DRV_COMPAT	wiznet_w5500
 
-LOG_MODULE_REGISTER(lean_wiznet, LOG_LEVEL_DBG);
+LOG_MODULE_REGISTER(lean_wiznet, LOG_LEVEL_WRN);
 
 #define W5500_NODE      DT_NODELABEL(w5500_dev)
 static const struct spi_dt_spec w5500_spi_handle = SPI_DT_SPEC_GET(W5500_NODE, SPI_OP_MODE_MASTER | SPI_TRANSFER_MSB | SPI_WORD_SET(8), 0);
