@@ -15,6 +15,10 @@
 #include "phy_main.h"
 #endif
 
+#if CONFIG_CHATTER
+#include "chatter.h"
+#endif
+
 static const struct gpio_dt_spec masterSlaveSwitchInput = GPIO_DT_SPEC_GET(DT_PATH(zephyr_user), master_slave_input_gpios);
 static const struct gpio_dt_spec masterSlaveSwitchOutput = GPIO_DT_SPEC_GET(DT_PATH(zephyr_user), master_slave_output_gpios);
 
@@ -117,6 +121,10 @@ int main(void)
 	LOG_INF("Device ID: 0x%04x", device_id);
 
   LeanWiznet_Init();
+
+  #if CONFIG_CHATTER
+  Chatter_Main();
+  #endif
 
   #if CONFIG_MAC_IMPL
   LeanWiznet_SetRxCallback(Mac_TxReady);

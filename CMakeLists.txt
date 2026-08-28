@@ -13,6 +13,7 @@ target_include_directories(app PRIVATE
   mac_impl 
   phy_impl
   lean_wiznet_driver
+  chatter
 )
 
 target_sources(app PRIVATE
@@ -23,4 +24,5 @@ target_sources(app PRIVATE
   phy_impl/phy_main.c
   phy_impl/pt.c
   phy_impl/ft.c
+  chatter/chatter.c
 )

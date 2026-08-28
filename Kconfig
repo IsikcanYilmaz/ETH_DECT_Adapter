@@ -59,6 +59,10 @@ config MAC_IMPL
   bool "Use the mac layer implementation"
   default n
 
+config CHATTER
+  bool "Chatter"
+  default n
+
 module = MAC_DEMO
 module-str = DECT MAC Demo
 source "$(ZEPHYR_BASE)/subsys/logging/Kconfig.template.log_config"
