@@ -144,7 +144,7 @@ int DectPhy_Transmit(uint32_t handle, void *data, size_t data_len, uint64_t star
   struct phy_ctrl_field_common header = {
     .header_format = 0x0,
     .packet_length_type = DECT_PACKET_LENGTH_SLOT,
-    .packet_length = 0x00,
+    .packet_length = 0x00, // <- here is the number of slots that are transmitted // 0 to send 1 slot per tx, 1 to send 2, 2 to send 3. no more is necessary or tested
     .short_network_id = (CONFIG_APP_NETWORK_ID & 0xff),
     .transmitter_id_hi = (device_id >> 8),
     .transmitter_id_lo = (device_id & 0xff),
