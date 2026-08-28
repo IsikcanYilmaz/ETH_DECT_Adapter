@@ -14,7 +14,9 @@
 #define DECT_GAP_TICK ((uint64_t) (DECT_GAP_US * NRF_MODEM_DECT_MODEM_TIME_TICK_RATE_KHZ) / 1000)
 
 // #define DECT_OPS_PER_BEACON 20 //164
-#define DECT_OPS_PER_BEACON 128
+#define DECT_OPS_PER_BEACON 128 // Works for 3 slots per transfer (packet_length = 0x02)
+#define DECT_OPS_PER_BEACON 164 // Works for 2 slots per transfer (packet_length = 0x01)
+#define DECT_OPS_PER_BEACON 218 // Works for 1 slot per transfer (packet_length = 0x01)
 
 // #define DECT_MASTER_BEACON_PERIOD_TICK (10 * 24 * DECT_SLOT_DURATION_TICK) //(30 * 24 * DECT_SLOT_DURATION_TICK)
 #define DECT_MASTER_BEACON_PERIOD_TICK (30 * 24 * DECT_SLOT_DURATION_TICK)

@@ -1,3 +1,4 @@
+#if CONFIG_PHY_IMPL
 #include <zephyr/kernel.h>
 #include <string.h>
 #include <stdbool.h>
@@ -143,7 +144,7 @@ int DectPhy_Transmit(uint32_t handle, void *data, size_t data_len, uint64_t star
   struct phy_ctrl_field_common header = {
     .header_format = 0x0,
     .packet_length_type = DECT_PACKET_LENGTH_SLOT,
-    .packet_length = 0x02,
+    .packet_length = 0x00,
     .short_network_id = (CONFIG_APP_NETWORK_ID & 0xff),
     .transmitter_id_hi = (device_id >> 8),
     .transmitter_id_lo = (device_id & 0xff),
@@ -160,6 +161,7 @@ int DectPhy_Transmit(uint32_t handle, void *data, size_t data_len, uint64_t star
     .lbt_rssi_threshold_max = 0,
     .carrier = CONFIG_CARRIER,
     .lbt_period = 0,// NRF_MODEM_DECT_LBT_PERIOD_MAX, // JON EXPERIMENTAL
+    // .lbt_period = NRF_MODEM_DECT_LBT_PERIOD_MAX, // JON EXPERIMENTAL
     .phy_header = (union nrf_modem_dect_phy_hdr *) &header,
     .data = data,
     .data_size = data_len,
@@ -717,3 +719,4 @@ void DectPhy_Main(bool master)
   }
 }
 
+#endif

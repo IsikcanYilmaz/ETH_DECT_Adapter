@@ -237,7 +237,7 @@ static void internal_ntf_association_release_cb(struct nrf_modem_dect_mac_associ
 
 static void internal_ntf_association_ind_cb(struct nrf_modem_dect_mac_association_ntf_cb_params *params)
 {
-  LOG_INF("FT association indication: status=%d rd=%u short_rd=%u ies=%u tx_method=%u",
+  LOG_WRN("FT association indication: status=%d rd=%u short_rd=%u ies=%u tx_method=%u",
           params->status, params->long_rd_id, params->short_rd_id,
           params->number_of_ies, params->tx_method);
 

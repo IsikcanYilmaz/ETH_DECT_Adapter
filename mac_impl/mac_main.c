@@ -440,8 +440,7 @@ static int start_pt_association(void)
     return -EINVAL;
   }
 
-  LOG_INF("Starting PT association: rd=%u nw=%u",
-          pt_parent_long_rd_id, pt_network_id);
+  LOG_WRN("Starting PT association: rd=%u nw=%u", pt_parent_long_rd_id, pt_network_id);
 
   err = dect_adapter_association_request(pt_parent_long_rd_id, pt_network_id);
   if (err == 0) {
@@ -549,6 +548,7 @@ int dect_send(enum app_mode source_mode, const char *buf, size_t len)
   pending_tx_transaction_id = tx_transaction_id++;
 
   err = dect_adapter_dlc_data_send(pending_tx_transaction_id, APP_FLOW_ID, target_long_rd_id, buf, len);
+
   if (err != 0) 
   {
     LOG_ERR("%s:%d ERR %d", __FUNCTION__, __LINE__, err);
@@ -645,7 +645,7 @@ static void process_cluster_beacon_event(const struct app_event *evt)
 static void process_association_ind_event(const struct app_event *evt)
 {
   if (evt->association_ind.status == 0) {
-    LOG_INF("process_association_ind_event status=%d rd=%u",
+    LOG_WRN("process_association_ind_event status=%d rd=%u",
             evt->association_ind.status, evt->association_ind.long_rd_id);
   } else {
     LOG_ERR("process_association_ind_event status=%d rd=%u",
@@ -1918,10 +1918,10 @@ int Mac_main(bool iAmMaster)
   int err;
   ssize_t id_len; uint8_t id_buf[4] = {0};
 
-  LOG_INF("### main START ###");
+  LOG_WRN("### main START ###");
 
   err = dect_adapter_init();
-  LOG_INF("dect_adapter_init: %d", err);
+  LOG_WRN("dect_adapter_init: %d", err);
   if (err != 0) {
     LOG_ERR("dect_adapter_init failed: %d", err);
     return err;
@@ -1943,7 +1943,7 @@ int Mac_main(bool iAmMaster)
     return err;
   }
 
-  LOG_DBG("Setting system mode to MAC...");
+  LOG_WRN("Setting system mode to MAC...");
   prepare_wait(WAIT_SYSTEMMODE);
   err = dect_adapter_system_mode_set_mac();
   if (err != 0) {
