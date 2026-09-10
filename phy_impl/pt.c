@@ -150,7 +150,7 @@ static void mock_pdc(const struct nrf_modem_dect_phy_pdc_event *evt) // TODO mak
       err = DectPhy_Receive(PT_RX_HANDLE + slotCounter, dlRxDuration, nextRx);
       err = DectPhy_Transmit(PT_TX_HANDLE + slotCounter, "THIRD", 5, nextTx);
       
-      ptState = PT_STATE_TEST; 
+      ptState = PT_STATE_SCHEDULED_UPLINK; 
     }
     gpio_pin_toggle_dt(ptDlSwitch);
     // LOG_WRN("DOWNLINK DATA RECEIVED @ %llu from handle %d", modem_time, evt->handle);
@@ -195,8 +195,7 @@ static void mock_complete(const struct nrf_modem_dect_phy_op_complete_event *evt
     else
     {
       LOG_WRN("LAST UPLINK IN FRAME DONE");
-      // ptState = PT_STATE_WAIT_FOR_LATCH_BEACON;
-      ptState = PT_STATE_TEST;
+      ptState = PT_STATE_WAIT_FOR_LATCH_BEACON;
     }
     // k_sem_give(&done_sem);
   }

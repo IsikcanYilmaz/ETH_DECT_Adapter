@@ -90,30 +90,45 @@ static void mock_complete(const struct nrf_modem_dect_phy_op_complete_event *evt
     slotCounter--;
     if (slotCounter) // OPS PER BEACON NOT DONE 
     {
+
+      //     we are here. The next UL is scheduled already. We want to schedule the DL after that
+      //       v
+      // [DL  ]x[UL  ] [DL  ][UL  ] [DL][UL] [DL][UL] ...
+      //              ^      ^
+      //           nextRx    |
+      //                     |
+      //                  nextTx
+      //
       txDelta = modem_time - lastTxCplt;
       lastTxCplt = modem_time;
       // dlSchedule = modem_time + DECT_SLOT_DURATION_TICK + 2 * opTransitionLatency + DECT_HEADROOM;
       // dlSchedule = modem_time + genericRelativeRxSchedule + genericRxDuration + opTransitionLatency + DECT_HEADROOM;
-      dlSchedule = modem_time + opTransitionLatency + DECT_HEADROOM + DECT_SLOT_DURATION_TICK + DECT_HEADROOM + opTransitionLatency;
-      err = DectPhy_TransmitHeadOfQueueAndReceive(slotCounter, 
-                                                  dlSchedule,
-                                                  genericRelativeRxSchedule, 
-                                                  genericRxDuration);
+      // dlSchedule = modem_time + opTransitionLatency + DECT_HEADROOM + DECT_SLOT_DURATION_TICK + DECT_HEADROOM + opTransitionLatency;
+      dlSchedule = modem_time + opTransitionLatency + DECT_HEADROOM + DECT_SLOT_DURATION_TICK + opTransitionLatency + DECT_HALF_HEADROOM;
+      ulSchedule = modem_time + opTransitionLatency + DECT_HEADROOM + DECT_SLOT_DURATION_TICK + opTransitionLatency + DECT_SLOT_DURATION_TICK + DECT_HEADROOM + opTransitionLatency;
+
+      // err = DectPhy_TransmitHeadOfQueueAndReceive(slotCounter, 
+      //                                             dlSchedule,
+      //                                             genericRelativeRxSchedule, 
+      //                                             genericRxDuration);
+      err |= DectPhy_TransmitHeadOfQueue(FT_TX_HANDLE + slotCounter, dlSchedule);
+      err |= DectPhy_Receive(FT_RX_HANDLE + slotCounter, genericRxDuration, ulSchedule);
     }
     else // OPS PER BEACON DONE
     {
       // return; // TODO remove   
       slotCounter = DECT_OPS_PER_BEACON;
       beaconSchedule = modem_time + opTransitionLatency + DECT_HEADROOM + DECT_SLOT_DURATION_TICK + DECT_HEADROOM + opTransitionLatency;
-      dlSchedule = beaconSchedule + DECT_SLOT_DURATION_TICK + opTransitionLatency + DECT_HEADROOM;
-      // dlSchedule = modem_time + genericRelativeRxSchedule + genericRxDuration + opTransitionLatency + DECT_HEADROOM;
-      // beaconSchedule = modem_time + genericRelativeRxSchedule + genericRxDuration + opTransitionLatency + DECT_HEADROOM;
-      // dlSchedule = beaconSchedule + DECT_SLOT_DURATION_TICK + opTransitionLatency + DECT_HEADROOM;
+      dlSchedule = beaconSchedule + DECT_SLOT_DURATION_TICK + DECT_HEADROOM + opTransitionLatency + DECT_HALF_HEADROOM;
+      ulSchedule = beaconSchedule + DECT_SLOT_DURATION_TICK + DECT_HEADROOM + opTransitionLatency + DECT_SLOT_DURATION_TICK + DECT_HEADROOM + opTransitionLatency;
+
       err = DectPhy_TransmitBeacon(beaconSchedule);
-      err = DectPhy_TransmitHeadOfQueueAndReceive(slotCounter, 
-                                                  dlSchedule, 
-                                                  genericRelativeRxSchedule, 
-                                                  genericRxDuration);
+      // err = DectPhy_TransmitHeadOfQueueAndReceive(slotCounter, 
+      //                                             dlSchedule, 
+      //                                             genericRelativeRxSchedule, 
+      //                                             genericRxDuration);
+      err |= DectPhy_TransmitHeadOfQueue(FT_TX_HANDLE + slotCounter, dlSchedule);
+      err |= DectPhy_Receive(FT_RX_HANDLE + slotCounter, genericRxDuration, ulSchedule);
     }
     // // LOG_ERR("%s @ MT: %llu HANDLE DLTX (%lli). %llu - %llu", __FUNCTION__, modem_time, modem_time - dlExpEnding, nextDlTxModemTick, nextDlTxModemTick + DECT_SLOT_DURATION_TICK);
     DectPhy_InFlightCompleted();
@@ -146,7 +161,8 @@ static void mock_time_get(const struct nrf_modem_dect_phy_time_get_event *evt)
     genericTxScheduleOffset = DECT_SLOT_DURATION_TICK + opTransitionLatency + DECT_HEADROOM;
     genericRelativeRxSchedule = opTransitionLatency; 
 
-    dlSchedule = base + genericTxScheduleOffset;
+    dlSchedule = base + DECT_SLOT_DURATION_TICK + DECT_HEADROOM + opTransitionLatency + DECT_HALF_HEADROOM;
+    ulSchedule = base + DECT_SLOT_DURATION_TICK + DECT_HEADROOM + opTransitionLatency + DECT_SLOT_DURATION_TICK + DECT_HEADROOM + opTransitionLatency; 
 
     genericRxDuration = DECT_SLOT_DURATION_TICK + DECT_HEADROOM;
 
@@ -158,7 +174,9 @@ static void mock_time_get(const struct nrf_modem_dect_phy_time_get_event *evt)
 
     // genericTxScheduleOffset = DECT_SLOT_DURATION_TICK + opTransitionLatency;
     err = DectPhy_TransmitBeacon(base);
-    err |= DectPhy_TransmitHeadOfQueueAndReceive(slotCounter, dlSchedule, genericRelativeRxSchedule, genericRxDuration); // note that here and only here we use the non generic dlSchedule time. just to start things off
+    // err |= DectPhy_TransmitHeadOfQueueAndReceive(slotCounter, dlSchedule, genericRelativeRxSchedule, genericRxDuration); // note that here and only here we use the non generic dlSchedule time. just to start things off
+    err |= DectPhy_TransmitHeadOfQueue(FT_TX_HANDLE + slotCounter, dlSchedule);
+    err |= DectPhy_Receive(FT_RX_HANDLE + slotCounter, genericRxDuration, ulSchedule);
     
     warmedUp = true;
     k_sem_give(&time_sem);
