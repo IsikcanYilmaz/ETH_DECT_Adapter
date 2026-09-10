@@ -7,7 +7,7 @@
 #include <zephyr/drivers/hwinfo.h>
 #include <zephyr/drivers/gpio.h>
 
-LOG_MODULE_REGISTER(dect_phy_pt, LOG_LEVEL_WRN);
+LOG_MODULE_REGISTER(dect_phy_pt, LOG_LEVEL_ERR);
 
 static void on_time_get_pt(const struct nrf_modem_dect_phy_time_get_event *evt)
 {
@@ -28,6 +28,10 @@ static void on_time_get_pt(const struct nrf_modem_dect_phy_time_get_event *evt)
 static void mock_pcc(const struct nrf_modem_dect_phy_pcc_event *evt)
 {
   int err;
+  if (evt->header_status)
+  {
+    LOG_ERR("PCC %d @ %llu", evt->header_status, modem_time);
+  }
 }
 
 static char firstbuf[8] = {'f', 'i', 'r', 's', 't', 0x00, 0x00, 0x00};
@@ -56,8 +60,8 @@ static void mock_pdc(const struct nrf_modem_dect_phy_pdc_event *evt) // TODO mak
       slotCounter = numSlotsInFrame;
 
       uint64_t dlRxDuration = DECT_SLOT_DURATION_TICK + DECT_HEADROOM;
-      uint64_t dlRxStart = next_beacon_tick + dlRxDuration + opTransitionLatency;
-      uint64_t ulTxStart = dlRxStart + dlRxDuration + opTransitionLatency;
+      uint64_t dlRxStart = next_beacon_tick + opTransitionLatency + dlRxDuration + opTransitionLatency;
+      uint64_t ulTxStart = dlRxStart + dlRxDuration + opTransitionLatency + (3*DECT_QUART_HEADROOM);
 
       firstbuf[5] = slotCounter;
       err = DectPhy_Receive(BEACON_LATCH_RX_HANDLE, dlRxDuration, next_beacon_tick); // SUCCESSFULLY RECEIVES
@@ -66,7 +70,7 @@ static void mock_pdc(const struct nrf_modem_dect_phy_pdc_event *evt) // TODO mak
 
       LOG_WRN("@ %llu FIRST BEACON RECEIVED. %d BYTES. %d OPS PER BEACON", modem_time, evt->len, slotCounter);
       LOG_WRN("EXPECTING LATCH BECAON IN %d TICKS, @ %llu", next_beacon_offset, modem_time + next_beacon_offset);
-      LOG_HEXDUMP_WRN(evt->data, 16, "BEACON");
+      LOG_HEXDUMP_WRN(evt->data, 16, "FIRST BEACON");
       LOG_WRN("NOW %llu LATCH SCH %llu DL SCH %llu UL SCH %llu", modem_time, next_beacon_tick, next_beacon_tick + DECT_SLOT_DURATION_TICK + opTransitionLatency + DECT_HEADROOM, next_beacon_tick + 2 * (DECT_SLOT_DURATION_TICK + opTransitionLatency + DECT_HEADROOM));
 
       gpio_pin_toggle_dt(beaconRxSwitch);
@@ -90,7 +94,7 @@ static void mock_pdc(const struct nrf_modem_dect_phy_pdc_event *evt) // TODO mak
   {
     if (DectPhy_PktIsBeacon(evt->data))
     {
-      LOG_WRN("LATCH BEACON RECEIVED @ %llu. PREV BEACON %llu DIFF %llu. EXPECTED @ %llu, EXPECTED DIFF %llu (- %llu)", modem_time, beacon_time, modem_time - beacon_time, expected_latch_beacon_time, modem_time - expected_latch_beacon_time, DECT_SLOT_DURATION_TICK);
+      LOG_WRN("LATCH BEACON RECEIVED @ %llu", modem_time);
       latch_beacon_time = modem_time;
       ptState = PT_STATE_SCHEDULED_DOWNLINK;
       // ptState = PT_STATE_TEST;
@@ -98,6 +102,7 @@ static void mock_pdc(const struct nrf_modem_dect_phy_pdc_event *evt) // TODO mak
     }
     else 
     {
+      // TODO Should also cancel all modem ops here
       err = DectPhy_Receive(BEACON_RX_HANDLE, US_TO_MODEM_TICKS(1000000000), 0); // Unexpected non beacon // TODO maybe just do this in the op_complete part
       ptState = PT_STATE_WAIT_FOR_BEACON;
       LOG_ERR("LATCH BEACON MISSED. GOING BACK TO PT_STATE_WAIT_FOR_BEACON");
@@ -120,7 +125,7 @@ static void mock_pdc(const struct nrf_modem_dect_phy_pdc_event *evt) // TODO mak
       //                  nextTx
 
       uint64_t nextRx = modem_time + opTransitionLatency + dlRxDuration + opTransitionLatency;
-      uint64_t nextTx = nextRx + dlRxDuration + opTransitionLatency + (DECT_HALF_HEADROOM);
+      uint64_t nextTx = nextRx + dlRxDuration + opTransitionLatency + (3*DECT_QUART_HEADROOM);
 
       err = DectPhy_Receive(PT_RX_HANDLE + slotCounter, dlRxDuration, nextRx);
       // err = DectPhy_TransmitHeadOfQueue(PT_TX_HANDLE + slotCounter, nextTx);
@@ -142,13 +147,15 @@ static void mock_pdc(const struct nrf_modem_dect_phy_pdc_event *evt) // TODO mak
       //                  nextRx   nextTx
 
       uint64_t next_beacon_tick = modem_time + opTransitionLatency + dlRxDuration + opTransitionLatency; 
-      uint64_t nextRx = next_beacon_tick + opTransitionLatency + dlRxDuration + opTransitionLatency;
-      uint64_t nextTx = nextRx + dlRxDuration + opTransitionLatency + (DECT_HALF_HEADROOM);
+      uint64_t nextRx = next_beacon_tick + dlRxDuration + opTransitionLatency + (DECT_HEADROOM);
+      uint64_t nextTx = nextRx + dlRxDuration + opTransitionLatency + (3*DECT_QUART_HEADROOM);
       // slotCounter = numSlotsInFrame; 
 
       err = DectPhy_Receive(BEACON_LATCH_RX_HANDLE, dlRxDuration, next_beacon_tick); // SUCCESSFULLY RECEIVES
       err = DectPhy_Receive(PT_RX_HANDLE + slotCounter, dlRxDuration, nextRx);
       err = DectPhy_Transmit(PT_TX_HANDLE + slotCounter, "THIRD", 5, nextTx);
+
+      LOG_WRN("EXPECTING LATCH @ %llu DL @ %llu UL @ %llu", next_beacon_tick, nextRx, nextTx);
       
       ptState = PT_STATE_SCHEDULED_UPLINK; 
     }
@@ -196,6 +203,7 @@ static void mock_complete(const struct nrf_modem_dect_phy_op_complete_event *evt
     {
       LOG_WRN("LAST UPLINK IN FRAME DONE");
       ptState = PT_STATE_WAIT_FOR_LATCH_BEACON;
+      slotCounter = numSlotsInFrame;
     }
     // k_sem_give(&done_sem);
   }

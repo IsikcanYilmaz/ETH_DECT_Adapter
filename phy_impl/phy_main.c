@@ -401,7 +401,8 @@ int DectPhy_TransmitHeadOfQueue(uint32_t handle, uint64_t start_time)
   else
   {
     LOG_DBG("NO PKT FROM ETH. SENDING BLANK TX");
-    err = DectPhy_Transmit(handle, "NONE", 4, start_time);
+    // err = DectPhy_Transmit(handle, "NONE", 4, start_time); // TODO bring this back
+    err = DectPhy_Transmit(handle, &handle, 4, start_time);
     inFlight->ptr = NULL;
   }
 
