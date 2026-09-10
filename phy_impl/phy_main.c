@@ -98,6 +98,7 @@ static uint16_t device_id;
 volatile bool warmedUp = false;
 volatile uint64_t modem_time;
 
+uint32_t numSlotsInFrame = 0;
 uint32_t slotCounter = 0;
 uint32_t frameCounter = 0;
 
@@ -322,7 +323,7 @@ int DectPhy_TransmitHeadOfQueueAndReceive(uint32_t handle_offset, uint64_t start
     .df_mcs = knobs.mcs,
   };
 
-  char testpayload[8] = {'t', 'e', 's', 't', (uint8_t) slotCounter};
+  char testpayload[8] = {'t', 'e', 's', 't', 48 + (uint8_t) slotCounter};
 
   struct nrf_modem_dect_phy_tx_rx_params tx_rx_op_params = {
     .tx = {

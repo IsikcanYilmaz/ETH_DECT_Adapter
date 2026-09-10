@@ -24,7 +24,9 @@
 #define DECT_GAP_US (5) // ?
 #define DECT_GAP_TICK ((uint64_t) (DECT_GAP_US * NRF_MODEM_DECT_MODEM_TIME_TICK_RATE_KHZ) / 1000)
 
-#define DECT_HEADROOM (US_TO_MODEM_TICKS(2000)) // 500 us
+#define DECT_HEADROOM (US_TO_MODEM_TICKS(500)) // 500 us
+#define DECT_HALF_HEADROOM (DECT_HEADROOM/2) 
+#define DECT_QUART_HEADROOM (DECT_HEADROOM/4)
 
 // #define DECT_OPS_PER_BEACON 8 //164
 #define DECT_OPS_PER_BEACON 20 //164 // working
@@ -132,6 +134,7 @@ extern volatile uint64_t modem_time;
 extern volatile enum DectPtState_e ptState;
 extern volatile enum DectFtState_e ftState;
 extern volatile bool warmedUp;
+extern uint32_t numSlotsInFrame;
 extern uint32_t slotCounter;
 
 extern uint32_t frameCounter;
