@@ -21,6 +21,25 @@ static void mock_pdc(const struct nrf_modem_dect_phy_pdc_event *evt)
 {
   // LOG_WRN("PDC %s @ %llu", evt->data, modem_time);
   LOG_HEXDUMP_WRN(evt->data, 16, "PDC");
+  if (!DectPhy_PktIsNone(evt->data))
+  {
+    LOG_DBG("%s %d handle, %d bytes", __FUNCTION__, evt->handle, evt->len);
+    LOG_HEXDUMP_DBG(evt->data, evt->len, "RX");
+    
+    // We got a packet from the DECT connection. Enqueue it to wiznet's tx queue
+    struct LeanWiznet_Packet *pkt = k_malloc(sizeof(struct LeanWiznet_Packet) + evt->len);
+
+    if (pkt == NULL)
+    {
+      LOG_ERR("%s: oom, cannot malloc", __FUNCTION__);
+    }
+    else
+    {
+      memcpy(pkt->payload, evt->data, evt->len);
+      pkt->size = evt->len;
+      DectPhy_EnqueueEthTx(pkt);
+    }
+  }
 }
 
 static void mock_pcc(const struct nrf_modem_dect_phy_pcc_event *evt) 
@@ -31,8 +50,6 @@ static void mock_pcc(const struct nrf_modem_dect_phy_pcc_event *evt)
   }
   LOG_DBG("PCC %d @ %llu", evt->header_status, modem_time);
 }
-
-
 
 // TODO move this up // TODO clean
 uint64_t base;
@@ -98,7 +115,7 @@ static void mock_complete(const struct nrf_modem_dect_phy_op_complete_event *evt
       //           nextRx    |
       //                     |
       //                  nextTx
-      //
+      
       txDelta = modem_time - lastTxCplt;
       lastTxCplt = modem_time;
       dlSchedule = modem_time + opTransitionLatency + DECT_HEADROOM + DECT_SLOT_DURATION_TICK + opTransitionLatency + DECT_HEADROOM;

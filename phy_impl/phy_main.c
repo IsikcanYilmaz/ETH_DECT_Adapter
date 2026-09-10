@@ -13,7 +13,7 @@
 #include "pt.h"
 #include "ft.h"
 
-LOG_MODULE_REGISTER(dect_phy, LOG_LEVEL_WRN);
+LOG_MODULE_REGISTER(dect_phy, LOG_LEVEL_ERR);
 
 #define CONFIG_CARRIER (1677) // from overlay-eu.conf
 
@@ -394,15 +394,15 @@ int DectPhy_TransmitHeadOfQueue(uint32_t handle, uint64_t start_time)
   if (!k_queue_is_empty(&ethRxQueue))
   {
     struct LeanWiznet_Packet *pkt = (struct LeanWiznet_Packet *) k_queue_get(&ethRxQueue, K_FOREVER);
-    LOG_DBG("%d BYTES READ FROM ETH, SCHEDULED FOR TX AT %llu", pkt->size, start_time);
+    LOG_WRN("%d BYTES READ FROM ETH, SCHEDULED FOR TX AT %llu", pkt->size, start_time);
     err = DectPhy_Transmit(handle, pkt->payload, pkt->size, start_time);
     inFlight->ptr = (void *) pkt;
   }
   else
   {
     LOG_DBG("NO PKT FROM ETH. SENDING BLANK TX");
-    // err = DectPhy_Transmit(handle, "NONE", 4, start_time); // TODO bring this back
-    err = DectPhy_Transmit(handle, &handle, 4, start_time);
+    err = DectPhy_Transmit(handle, "NONE", 4, start_time); // TODO bring this back
+    // err = DectPhy_Transmit(handle, &handle, 4, start_time);
     inFlight->ptr = NULL;
   }
 

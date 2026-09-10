@@ -66,7 +66,7 @@ static void mock_pdc(const struct nrf_modem_dect_phy_pdc_event *evt) // TODO mak
       firstbuf[5] = slotCounter;
       err = DectPhy_Receive(BEACON_LATCH_RX_HANDLE, dlRxDuration, next_beacon_tick); // SUCCESSFULLY RECEIVES
       err = DectPhy_Receive(PT_RX_HANDLE + slotCounter, dlRxDuration, dlRxStart); // SUCCESSFULLY RECEIVES 
-      err = DectPhy_Transmit(PT_TX_HANDLE + slotCounter, firstbuf, 8, ulTxStart); // SUCCESSFULLY TRANSMITS
+      err = DectPhy_TransmitHeadOfQueue(PT_TX_HANDLE + slotCounter, ulTxStart); // SUCCESSFULLY TRANSMITS
 
       LOG_WRN("@ %llu FIRST BEACON RECEIVED. %d BYTES. %d OPS PER BEACON", modem_time, evt->len, slotCounter);
       LOG_WRN("EXPECTING LATCH BECAON IN %d TICKS, @ %llu", next_beacon_offset, modem_time + next_beacon_offset);
@@ -128,8 +128,7 @@ static void mock_pdc(const struct nrf_modem_dect_phy_pdc_event *evt) // TODO mak
       uint64_t nextTx = nextRx + dlRxDuration + opTransitionLatency + (3*DECT_QUART_HEADROOM);
 
       err = DectPhy_Receive(PT_RX_HANDLE + slotCounter, dlRxDuration, nextRx);
-      // err = DectPhy_TransmitHeadOfQueue(PT_TX_HANDLE + slotCounter, nextTx);
-      err = DectPhy_Transmit(PT_TX_HANDLE + slotCounter, &slotCounter, 4, nextTx);
+      err = DectPhy_TransmitHeadOfQueue(PT_TX_HANDLE + slotCounter, nextTx);
 
       LOG_DBG("@ %llu Scheduled rx to %llu and tx to %llu. slot %d. PCC-PDC DIFF %llu", modem_time, nextRx, nextTx, slotCounter, lastPdcModemTick - lastPccModemTick);
 
@@ -149,16 +148,35 @@ static void mock_pdc(const struct nrf_modem_dect_phy_pdc_event *evt) // TODO mak
       uint64_t next_beacon_tick = modem_time + opTransitionLatency + dlRxDuration + opTransitionLatency; 
       uint64_t nextRx = next_beacon_tick + dlRxDuration + opTransitionLatency + (DECT_HEADROOM);
       uint64_t nextTx = nextRx + dlRxDuration + opTransitionLatency + (3*DECT_QUART_HEADROOM);
-      // slotCounter = numSlotsInFrame; 
 
       err = DectPhy_Receive(BEACON_LATCH_RX_HANDLE, dlRxDuration, next_beacon_tick); // SUCCESSFULLY RECEIVES
       err = DectPhy_Receive(PT_RX_HANDLE + slotCounter, dlRxDuration, nextRx);
-      err = DectPhy_Transmit(PT_TX_HANDLE + slotCounter, "THIRD", 5, nextTx);
+      err = DectPhy_TransmitHeadOfQueue(PT_TX_HANDLE + slotCounter, nextTx);
 
       LOG_WRN("EXPECTING LATCH @ %llu DL @ %llu UL @ %llu", next_beacon_tick, nextRx, nextTx);
       
       ptState = PT_STATE_SCHEDULED_UPLINK; 
     }
+
+    if (!DectPhy_PktIsNone(evt->data))
+    {
+      LOG_DBG("PT RECEIVED %d BYTES FROM FT IN SLOT %d", evt->len, slotCounter);
+      LOG_HEXDUMP_DBG(evt->data, evt->len, "RX");
+
+      // We got a packet from the DECT connection. Enqueue it to wiznet's tx queue // TODO reduce code dupes
+      struct LeanWiznet_Packet *pkt = k_malloc(sizeof(struct LeanWiznet_Packet) + evt->len);
+      if (pkt == NULL)
+      {
+        LOG_ERR("%s:%d out of memory! cannot malloc %d bytes", __FUNCTION__, __LINE__, evt->len + sizeof(struct LeanWiznet_Packet));
+      }
+      else
+    {
+        memcpy(pkt->payload, evt->data, evt->len);
+        pkt->size = evt->len;
+        DectPhy_EnqueueEthTx(pkt);
+      }
+    }
+
     gpio_pin_toggle_dt(ptDlSwitch);
     // LOG_WRN("DOWNLINK DATA RECEIVED @ %llu from handle %d", modem_time, evt->handle);
     LOG_HEXDUMP_WRN(evt->data, 16, "DL");
@@ -195,6 +213,7 @@ static void mock_complete(const struct nrf_modem_dect_phy_op_complete_event *evt
   if (ptState == PT_STATE_SCHEDULED_UPLINK && IS_TX_HANDLE(evt->handle)) // ULTx DONE. EITHER KEEP GOING, OR THIS IS THE END OF A FRAME
   {
     gpio_pin_toggle_dt(ptUlSwitch);
+    DectPhy_InFlightCompleted();
     if (slotCounter)
     {
       ptState = PT_STATE_SCHEDULED_DOWNLINK;
