@@ -7,7 +7,7 @@
 #include <zephyr/drivers/gpio.h>
 #include "ft.h"
 
-LOG_MODULE_REGISTER(dect_phy_ft, LOG_LEVEL_ERR);
+LOG_MODULE_REGISTER(dect_phy_ft, LOG_LEVEL_WRN);
 
 static void on_pcc_ft(const struct nrf_modem_dect_phy_pcc_event *evt)
 {
@@ -19,13 +19,10 @@ static void on_pcc_ft(const struct nrf_modem_dect_phy_pcc_event *evt)
 
 static void mock_pdc(const struct nrf_modem_dect_phy_pdc_event *evt) 
 {
-  // LOG_WRN("PDC %s @ %llu", evt->data, modem_time);
-  LOG_HEXDUMP_WRN(evt->data, 16, "PDC");
+  LOG_DBG("%s %d handle, %d bytes", __FUNCTION__, evt->handle, evt->len);
+  LOG_HEXDUMP_DBG(evt->data, evt->len, "RX");
   if (!DectPhy_PktIsNone(evt->data))
   {
-    LOG_DBG("%s %d handle, %d bytes", __FUNCTION__, evt->handle, evt->len);
-    LOG_HEXDUMP_DBG(evt->data, evt->len, "RX");
-    
     // We got a packet from the DECT connection. Enqueue it to wiznet's tx queue
     struct LeanWiznet_Packet *pkt = k_malloc(sizeof(struct LeanWiznet_Packet) + evt->len);
 
@@ -173,11 +170,6 @@ static void mock_time_get(const struct nrf_modem_dect_phy_time_get_event *evt)
 
     LOG_WRN("genericTxScheduleOffset: %llu\ndlSchedule: %llu\ngenericRxDuration: %llu\nheadroom: %llu\nblock: %llu\n", genericTxScheduleOffset, dlSchedule, genericRxDuration, DECT_HEADROOM, blockTicks);
 
-    // Notes to self: genericRxDuration, genericRelativeRxSchedule, dlSchedule, 
-
-    LOG_WRN("SANITY TEST 1 : FIRST BEACON WILL GO AT %llu , SECOND WILL BE %d TICKS AWAY FROM IT, AT @ %llu", base, (1 + (DECT_OPS_PER_BEACON * 2)) * blockTicks, base + (1 + (DECT_OPS_PER_BEACON * 2)) * blockTicks);
-
-    // genericTxScheduleOffset = DECT_SLOT_DURATION_TICK + opTransitionLatency;
     err = DectPhy_TransmitBeacon(base);
     err |= DectPhy_TransmitHeadOfQueue(FT_TX_HANDLE + slotCounter, dlSchedule);
     err |= DectPhy_Receive(FT_RX_HANDLE + slotCounter, genericRxDuration, ulSchedule);

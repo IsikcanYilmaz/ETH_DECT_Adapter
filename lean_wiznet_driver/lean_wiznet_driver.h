@@ -118,6 +118,11 @@ struct LeanWiznet_runtime {
 	uint8_t buf[1500]; // JON pound define
 };
 
+struct LeanWiznet_PacketFragment{
+  uint16_t remainingFragments;
+  char payload[];
+} __attribute__((packed));
+
 struct LeanWiznet_Packet{
   uint32_t reserved; // k_queue_append uses the first 4 bytes of this for internal book keeping
   uint16_t size;

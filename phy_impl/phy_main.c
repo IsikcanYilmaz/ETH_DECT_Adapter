@@ -72,6 +72,10 @@ DectKnobs_t knobs = {
   .ops_per_beacon = DECT_OPS_PER_BEACON,
 };
 
+// MCS to NUM BYTES PER SLOT. Indexed by MCS
+// MCS:                      0   1   2   3   4
+int mcsToBytesPerSlot[5] = {17, 37, 57, 77, 117};
+
 inline uint64_t us_to_modem_ticks(uint64_t us)
 {
   return (((uint64_t) us / 1000) * NRF_MODEM_DECT_MODEM_TIME_TICK_RATE_KHZ);
@@ -391,7 +395,7 @@ int DectPhy_TransmitHeadOfQueue(uint32_t handle, uint64_t start_time)
 
   inFlight->handle = handle;
 
-  if (!k_queue_is_empty(&ethRxQueue))
+  if (!k_queue_is_empty(&ethRxQueue)) // TODO
   {
     struct LeanWiznet_Packet *pkt = (struct LeanWiznet_Packet *) k_queue_get(&ethRxQueue, K_FOREVER);
     LOG_WRN("%d BYTES READ FROM ETH, SCHEDULED FOR TX AT %llu", pkt->size, start_time);
@@ -443,7 +447,7 @@ int DectPhy_TransmitBeacon(uint64_t start_time)
   // TODO make these generic, reuse
   struct phy_ctrl_field_common header = {
     .header_format = 0x0,
-    .packet_length_type = DECT_PACKET_LENGTH_SUBSLOT,
+    .packet_length_type = DECT_PACKET_LENGTH_SLOT,
     .packet_length = 0x00,
     .short_network_id = (CONFIG_APP_NETWORK_ID & 0xff),
     .transmitter_id_hi = (device_id >> 8),
@@ -480,6 +484,13 @@ void DectPhy_EnqueueEthTx(void *pkt)
 {
   k_queue_append(&ethTxQueue, pkt);
 }
+
+// int DectPhy_HandleIncomingPacketFragment(LeanWiznet_PacketFragment *frag)
+// {
+//   int err;
+//
+//   return err;
+// }
 
 /* Callback after init operation. */
 static void on_init(const struct nrf_modem_dect_phy_init_event *evt)
@@ -519,9 +530,9 @@ static void on_capability_get(const struct nrf_modem_dect_phy_capability_get_eve
   }
   else 
   {
-    LOG_WRN("capability_get cb time %"PRIu64" status %x", modem_time, evt->err);
+    LOG_ERR("capability_get cb time %"PRIu64" status %x", modem_time, evt->err);
     struct nrf_modem_dect_phy_capability *capa = evt->capability;
-    LOG_WRN("rx spatial streams: %d\n\
+    LOG_ERR("rx spatial streams: %d\n\
             mcs max:             %d\n\
             current mcs:         %d\n\
             mu:                  %d\n\
@@ -761,7 +772,7 @@ int DectPhy_Init(void)
 	
   hwinfo_get_device_id((void *)&device_id, sizeof(device_id));
 	
-  LOG_INF("Dect NR+ PHY initialized, device ID: %d", device_id);
+  LOG_ERR("Dect NR+ PHY initialized, device ID: %d", device_id);
 
   return 0;
 }
