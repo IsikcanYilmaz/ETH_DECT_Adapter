@@ -160,21 +160,24 @@ static void mock_pdc(const struct nrf_modem_dect_phy_pdc_event *evt) // TODO mak
 
     if (!DectPhy_PktIsNone(evt->data))
     {
-      LOG_DBG("PT RECEIVED %d BYTES FROM FT IN SLOT %d", evt->len, slotCounter);
-      LOG_HEXDUMP_DBG(evt->data, evt->len, "RX");
+      LOG_WRN("PT RECEIVED %d BYTES FROM FT IN SLOT %d", evt->len, slotCounter);
+      LOG_HEXDUMP_WRN(evt->data, evt->len, "RX");
 
-      // We got a packet from the DECT connection. Enqueue it to wiznet's tx queue // TODO reduce code dupes
-      struct LeanWiznet_Packet *pkt = k_malloc(sizeof(struct LeanWiznet_Packet) + evt->len);
-      if (pkt == NULL)
-      {
-        LOG_ERR("%s:%d out of memory! cannot malloc %d bytes", __FUNCTION__, __LINE__, evt->len + sizeof(struct LeanWiznet_Packet));
-      }
-      else
-    {
-        memcpy(pkt->payload, evt->data, evt->len);
-        pkt->size = evt->len;
-        DectPhy_EnqueueEthTx(pkt);
-      }
+      DectPhy_HandleIncomingPacketFragment(evt->data, evt->len);
+
+      // JON TODO pass bytes into the eth port
+      // // We got a packet from the DECT connection. Enqueue it to wiznet's tx queue // TODO reduce code dupes
+      // struct LeanWiznet_Packet *pkt = k_malloc(sizeof(struct LeanWiznet_Packet) + evt->len);
+      // if (pkt == NULL)
+      // {
+      //   LOG_ERR("%s:%d out of memory! cannot malloc %d bytes", __FUNCTION__, __LINE__, evt->len + sizeof(struct LeanWiznet_Packet));
+      // }
+      // else
+      // {
+      //   memcpy(pkt->payload, evt->data, evt->len);
+      //   pkt->size = evt->len;
+      //   DectPhy_EnqueueEthTx(pkt);
+      // }
     }
 
     gpio_pin_toggle_dt(ptDlSwitch);

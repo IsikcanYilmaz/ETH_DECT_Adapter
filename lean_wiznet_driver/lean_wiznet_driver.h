@@ -123,7 +123,7 @@ struct LeanWiznet_PacketFragment{
   char payload[];
 } __attribute__((packed));
 
-struct LeanWiznet_Packet{
+struct LeanWiznet_Packet{ // TODO Change name to LeanWiznetPacket_s or something
   uint32_t reserved; // k_queue_append uses the first 4 bytes of this for internal book keeping
   uint16_t size;
   char payload[];

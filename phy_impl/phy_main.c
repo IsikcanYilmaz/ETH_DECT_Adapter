@@ -13,7 +13,7 @@
 #include "pt.h"
 #include "ft.h"
 
-LOG_MODULE_REGISTER(dect_phy, LOG_LEVEL_ERR);
+LOG_MODULE_REGISTER(dect_phy, LOG_LEVEL_WRN);
 
 #define CONFIG_CARRIER (1677) // from overlay-eu.conf
 
@@ -65,6 +65,11 @@ volatile enum DectFtState_e ftState = FT_STATE_IDLE;
 int mcs_max = -1;
 
 sys_slist_t ops_list;
+
+// FRAGMENTATION
+struct LeanWiznet_Packet *currentTxPacket = NULL;
+uint8_t currentDatagramOffset = 0;
+uint8_t currentDatagramTag = 0;
 
 // KNOBS
 DectKnobs_t knobs = {
@@ -139,7 +144,7 @@ struct phy_ctrl_field_common {
 /* Dect PHY config parameters. */
 static struct nrf_modem_dect_phy_config_params dect_phy_config_params = {
 	.band_group_index = ((CONFIG_CARRIER >= 525 && CONFIG_CARRIER <= 551)) ? 1 : 0,
-	.harq_rx_process_count = 4,
+	.harq_rx_process_count = 4, // JON can i lower this since i dont use harq
 	.harq_rx_expiry_time_us = 5000000,
 };
 
@@ -153,11 +158,7 @@ K_SEM_DEFINE(done_sem, 0, 1);
 bool DectPhy_PktIsBeacon(char *pkt)
 {
   DectBeaconMessage_t *beac = pkt;
-  if (strncmp(beac->magic, DECT_BEACON_MAGIC_STRING, 4) == 0)
-  {
-    return true;
-  }
-  return false;
+  return (strncmp(beac->magic, DECT_BEACON_MAGIC_STRING, 4) == 0);
 }
 
 bool DectPhy_PktIsNone(char *pkt) 
@@ -206,7 +207,7 @@ int DectPhy_Receive(uint32_t handle, uint32_t durationTicks, uint64_t start_time
 		.start_time = start_time,
 		.handle = handle,
 		.network_id = CONFIG_APP_NETWORK_ID,
-		.mode = NRF_MODEM_DECT_PHY_RX_MODE_SINGLE_SHOT, //NRF_MODEM_DECT_PHY_RX_MODE_CONTINUOUS,
+		.mode = NRF_MODEM_DECT_PHY_RX_MODE_SINGLE_SHOT,
 		.rssi_interval = NRF_MODEM_DECT_PHY_RSSI_INTERVAL_OFF,
 		.link_id = NRF_MODEM_DECT_PHY_LINK_UNSPECIFIED,
 		.rssi_level = -60,
@@ -231,22 +232,23 @@ int DectPhy_Receive(uint32_t handle, uint32_t durationTicks, uint64_t start_time
 // TODO find a better way lol
 void DectPhy_InFlightCompleted(void)
 {
-  // Tx just completed. Free the pointer of what just got tx'd. 
-  if (k_queue_is_empty(&inFlightQueue))
-  {
-    LOG_ERR("TX COMPLETE BUT IN FLIGHT QUEUE EMPTY!!!");
-  }
-  else
-  {
-    struct DectInFlightPktStub_s *pktToFree = k_queue_get(&inFlightQueue, K_FOREVER);
-    if (pktToFree)
-    {
-      if (pktToFree->ptr)
-        LOG_DBG("IN FLIGHT PKT FROM HANDLE %d DONE. 0x%08x. FREEING", pktToFree->handle, pktToFree->ptr);
-      k_free(pktToFree->ptr);
-      k_free(pktToFree);
-    }
-  }
+  // TODO depricating the inflight business
+  // // Tx just completed. Free the pointer of what just got tx'd. 
+  // if (k_queue_is_empty(&inFlightQueue))
+  // {
+  //   LOG_ERR("TX COMPLETE BUT IN FLIGHT QUEUE EMPTY!!!");
+  // }
+  // else
+  // {
+  //   struct DectInFlightPktStub_s *pktToFree = k_queue_get(&inFlightQueue, K_FOREVER);
+  //   if (pktToFree)
+  //   {
+  //     if (pktToFree->ptr)
+  //       LOG_DBG("IN FLIGHT PKT FROM HANDLE %d DONE. 0x%08x. FREEING", pktToFree->handle, pktToFree->ptr);
+  //     k_free(pktToFree->ptr);
+  //     k_free(pktToFree);
+  //   }
+  // }
 }
 
 int DectPhy_Transmit(uint32_t handle, void *data, size_t data_len, uint64_t start_time)
@@ -272,7 +274,7 @@ int DectPhy_Transmit(uint32_t handle, void *data, size_t data_len, uint64_t star
     .phy_type = 0,
     .lbt_rssi_threshold_max = 0,
     .carrier = CONFIG_CARRIER,
-    .lbt_period = 0,// NRF_MODEM_DECT_LBT_PERIOD_MAX, // JON EXPERIMENTAL
+    .lbt_period = 0,
     .phy_header = (union nrf_modem_dect_phy_hdr *) &header,
     .data = data,
     .data_size = data_len,
@@ -288,141 +290,85 @@ int DectPhy_Transmit(uint32_t handle, void *data, size_t data_len, uint64_t star
 	return 0;
 }
 
-int DectPhy_TransmitHeadOfQueueAndReceive(uint32_t handle_offset, uint64_t start_time_tx, uint64_t start_time_rx, uint32_t rx_duration)
-{
-  int err;
-  
-  // Prep our payload
-  struct DectInFlightPktStub_s *inFlight = k_malloc(sizeof(struct DectInFlightPktStub_s));
-  if (inFlight == NULL)
-  {
-    LOG_ERR("%s: oom cannot malloc", __FUNCTION__);
-    return -ENOMEM;
-  }
-
-  inFlight->handle = TX_COMBO_HANDLE + handle_offset;
-
-  struct LeanWiznet_Packet *pkt;
-  if (!k_queue_is_empty(&ethRxQueue))
-  {
-    pkt = (struct LeanWiznet_Packet *) k_queue_get(&ethRxQueue, K_FOREVER);
-    LOG_DBG("%d BYTES READ FROM ETH, SCHEDULED FOR TX AT %llu", pkt->size, start_time_tx);
-    inFlight->ptr = (void *) pkt;
-  }
-  else
-  {
-    LOG_DBG("NO PKT FROM ETH. SENDING BLANK TX");
-    inFlight->ptr = NULL;
-  }
-  
-  struct phy_ctrl_field_common header = {
-    .header_format = 0x0,
-    .packet_length_type = DECT_PACKET_LENGTH_SLOT,
-    .packet_length = 0x00,
-    .short_network_id = (CONFIG_APP_NETWORK_ID & 0xff),
-    .transmitter_id_hi = (device_id >> 8),
-    .transmitter_id_lo = (device_id & 0xff),
-    .transmit_power = CONFIG_APP_TX_POWER,
-    .reserved = 0,
-    .df_mcs = knobs.mcs,
-  };
-
-  char testpayload[8] = {'t', 'e', 's', 't', 48 + (uint8_t) slotCounter};
-
-  struct nrf_modem_dect_phy_tx_rx_params tx_rx_op_params = {
-    .tx = {
-      .start_time = start_time_tx,
-      .handle = TX_COMBO_HANDLE + handle_offset,
-      .network_id = CONFIG_APP_NETWORK_ID,
-      .phy_type = 0,
-      .lbt_rssi_threshold_max = 0,
-      .carrier = CONFIG_CARRIER,
-      .lbt_period = 0,// NRF_MODEM_DECT_LBT_PERIOD_MAX, // JON EXPERIMENTAL
-      .phy_header = (union nrf_modem_dect_phy_hdr *) &header,
-      
-      // .data = (inFlight->ptr) ? pkt->payload : "NONE", // TODO clean  // TODO UNCOMMENT AFTER TESTING
-      // .data_size = (inFlight->ptr) ? pkt->size : 4,
-
-      .data = (inFlight->ptr) ? pkt->payload : &testpayload, // TODO clean 
-      .data_size = (inFlight->ptr) ? pkt->size : 6,
-    },
-    .rx = {
-      .start_time = start_time_rx,
-      .handle = RX_COMBO_HANDLE + handle_offset,
-      .network_id = CONFIG_APP_NETWORK_ID,
-      .mode = NRF_MODEM_DECT_PHY_RX_MODE_SINGLE_SHOT,
-      .rssi_interval = NRF_MODEM_DECT_PHY_RSSI_INTERVAL_OFF,
-      .link_id = NRF_MODEM_DECT_PHY_LINK_UNSPECIFIED,
-      .rssi_level = -60,
-      .carrier = CONFIG_CARRIER,
-      .duration = rx_duration,
-      .filter.short_network_id = CONFIG_APP_NETWORK_ID & 0xff,
-      .filter.is_short_network_id_used = 1,
-      /* listen for everything (broadcast mode used) */
-      .filter.receiver_identity = 0,
-    }
-  };
-
-  err = nrf_modem_dect_phy_tx_rx(&tx_rx_op_params);
-
-  if (err)
-  {
-    LOG_ERR("%s: transmission error");
-    if (inFlight->ptr)
-    {
-      k_free(inFlight->ptr);
-    }
-    k_free(inFlight);
-  }
-  else 
-  {
-    k_queue_append(&inFlightQueue, inFlight);
-  }
-
-  return err;
-}
-
 int DectPhy_TransmitHeadOfQueue(uint32_t handle, uint64_t start_time)
 {
   int err;
-  struct DectInFlightPktStub_s *inFlight = k_malloc(sizeof(struct DectInFlightPktStub_s));
+  // struct DectInFlightPktStub_s *inFlight = k_malloc(sizeof(struct DectInFlightPktStub_s));
   
-  if (inFlight == NULL)
+  // If we have an outgoing datagram loaded up, keep sending it. 
+  size_t txSizePerMcs = mcsToBytesPerSlot[knobs.mcs];
+  DectPacket_t *fragmentPkt = k_malloc(txSizePerMcs); 
+  // JON Interesting point here: apparently in 802.15.4 each frame carries data from exactly one datagram. 
+  // Question is do we have to do it that way? Assume one slot we pack with the remaining bytes of a datagram, 2 bytes
+  // the rest of the slot is going to be empty. Do we want this? Could it even be a paper? lol
+  //
+  // TODO JON no pack as many SDUs as you can here. But lets get one by one working
+
+  memset(fragmentPkt, 0x00, txSizePerMcs); // TODO remove this not needed
+  size_t effectivePayloadSize;
+
+  // TODO JON Pack fragmentPkt with as many SDUs in a loop
+
+  // If nothing is loaded in our currentTxPacket slot, first check if we even have a packet in the queue, if so load it
+  if (currentTxPacket == NULL && !k_queue_is_empty(&ethRxQueue))
   {
-    LOG_ERR("%s: oom cannot malloc", __FUNCTION__);
-    return -ENOMEM;
+    currentTxPacket = (struct LeanWiznet_Packet *) k_queue_get(&ethRxQueue, K_FOREVER);
+    currentDatagramOffset = 0;
+    LOG_WRN("LOADED UP DATAGRAM %d. %d BYTES", currentDatagramTag, currentTxPacket->size);
+    LOG_HEXDUMP_WRN(currentTxPacket->payload, currentTxPacket->size, "FULL DATAGRAM");
   }
 
-  inFlight->handle = handle;
-
-  if (!k_queue_is_empty(&ethRxQueue)) // TODO
+  if (currentTxPacket)
   {
-    struct LeanWiznet_Packet *pkt = (struct LeanWiznet_Packet *) k_queue_get(&ethRxQueue, K_FOREVER);
-    LOG_WRN("%d BYTES READ FROM ETH, SCHEDULED FOR TX AT %llu", pkt->size, start_time);
-    err = DectPhy_Transmit(handle, pkt->payload, pkt->size, start_time);
-    inFlight->ptr = (void *) pkt;
+    // First decide if it needs to be fragmented.
+    bool needsFragmenting = (currentDatagramOffset || currentTxPacket->size > (txSizePerMcs - sizeof(DectPacket_t)));
+
+    // Find the available payload size
+    size_t overheadHeaderSize = (needsFragmenting) ? (sizeof(DectFragmentationHeader_t) + sizeof(DectPacket_t)) : (sizeof(DectPacket_t));
+    effectivePayloadSize = txSizePerMcs - overheadHeaderSize;
+
+    // Check if we can pack the remaining bytes in this fragment
+    if (currentTxPacket->size - currentDatagramOffset < effectivePayloadSize)
+    {
+      effectivePayloadSize = currentTxPacket->size - currentDatagramOffset;
+    }
+
+    // Construct the actual packet to be sent with the necessary headers
+    fragmentPkt->flags |= (1 << DECT_DATA_PACKET_FLAG_BIT);
+    fragmentPkt->payloadSize = (needsFragmenting) ? (sizeof(DectFragmentationHeader_t) + effectivePayloadSize) : effectivePayloadSize;
+    if (needsFragmenting)
+    {
+      fragmentPkt->flags |= (1 << DECT_FRAG_HEADER_EXISTS_FLAG_BIT);
+      DectFragmentationHeader_t *fragHeader = (DectFragmentationHeader_t *) fragmentPkt->payload;
+      fragHeader->datagramSize = currentTxPacket->size;
+      fragHeader->datagramOffset = currentDatagramOffset;
+      fragHeader->datagramTag = currentDatagramTag;
+    }
+    memcpy(((uint8_t *) fragmentPkt) + overheadHeaderSize, (char *) (currentTxPacket->payload + currentDatagramOffset), effectivePayloadSize);
+
+    LOG_WRN("FROM OFFSET %d, %d BYTES SENT OF %d. (Header %d: flags 0x%x, plSize %d, totalSize %d)", currentDatagramOffset, effectivePayloadSize, currentTxPacket->size, overheadHeaderSize, fragmentPkt->flags, fragmentPkt->payloadSize, effectivePayloadSize + overheadHeaderSize);
+    LOG_HEXDUMP_WRN(fragmentPkt, txSizePerMcs, "FRAGPKT");
+
+    err = DectPhy_Transmit(handle, fragmentPkt, txSizePerMcs, start_time);
+
+    currentDatagramOffset += effectivePayloadSize;
+    if (currentDatagramOffset >= currentTxPacket->size)
+    {
+      LOG_WRN("ALL FRAGMENTS OF TAG %d TRANSMITTED", currentDatagramTag);
+      currentDatagramTag++;
+      k_free(currentTxPacket);
+      currentTxPacket = NULL;
+      currentDatagramOffset = 0;
+    }
   }
   else
   {
+    // If we dont have a loaded up outgoing datagram, send a blank. TODO bad 
     LOG_DBG("NO PKT FROM ETH. SENDING BLANK TX");
-    err = DectPhy_Transmit(handle, "NONE", 4, start_time); // TODO bring this back
-    // err = DectPhy_Transmit(handle, &handle, 4, start_time);
-    inFlight->ptr = NULL;
+    err = DectPhy_Transmit(handle, "NONE", 4, start_time); // TODO Change this to use the actual PDU 
   }
 
-  if (err)
-  {
-    LOG_ERR("%s: transmission error");
-    if (inFlight->ptr)
-    {
-      k_free(inFlight->ptr);
-    }
-    k_free(inFlight);
-  }
-  else 
-  {
-    k_queue_append(&inFlightQueue, inFlight);
-  }
+  k_free(fragmentPkt);
   return err;
 }
 
@@ -485,12 +431,44 @@ void DectPhy_EnqueueEthTx(void *pkt)
   k_queue_append(&ethTxQueue, pkt);
 }
 
-// int DectPhy_HandleIncomingPacketFragment(LeanWiznet_PacketFragment *frag)
-// {
-//   int err;
-//
-//   return err;
-// }
+int DectPhy_HandleIncomingPacketFragment(char *data, size_t len)
+{
+  int err = 0;
+
+  DectPacket_t *dectpkt = (DectPacket_t *) data;
+
+  bool isDataPacket = ((dectpkt->flags & (1 << DECT_DATA_PACKET_FLAG_BIT)) > 0);
+  bool isFragmented = ((dectpkt->flags & (1 << DECT_FRAG_HEADER_EXISTS_FLAG_BIT)) > 0);
+  bool reassemblyComplete = (!isFragmented);
+  size_t sduSize = dectpkt->payloadSize;
+  
+  LOG_WRN("RECEIVED DATA %d. %s %s", dectpkt->payloadSize, (isDataPacket) ? "IS_DATA":"", (isFragmented) ? "IS_FRAG":"");
+
+  if (isFragmented)
+  {
+    DectFragmentationHeader_t *fragHeader = (DectFragmentationHeader_t *) (dectpkt->payload);
+    sduSize -= sizeof(DectFragmentationHeader_t);
+    LOG_WRN("FRAGMENT: OFFSET %d, SIZE %d, TAG %d, FRAGMENT PL SIZE %d", fragHeader->datagramOffset, fragHeader->datagramSize, fragHeader->datagramTag, sduSize);
+  }
+
+  if (reassemblyComplete)
+  {
+    LOG_WRN("REASSEMBLY COMPLETE. SENDING OFF %d BYTES TO ETH", sduSize);
+    // struct LeanWiznet_Packet *wiznetpkt = k_malloc(sizeof(struct LeanWiznet_Packet) + sduSize);
+    // if (wiznetpkt == NULL)
+    // {
+    //   LOG_ERR("%s:%d out of memory! cannot malloc %d bytes", __FUNCTION__, __LINE__, len + sizeof(struct LeanWiznet_Packet));
+    // }
+    // else
+    // {
+    //   memcpy(wiznetpkt->payload, dectpkt->data, sduSize);
+    //   wiznetpkt->size = sduSize;
+    //   DectPhy_EnqueueEthTx(wiznetpkt);
+    // }
+  }
+
+  return err;
+}
 
 /* Callback after init operation. */
 static void on_init(const struct nrf_modem_dect_phy_init_event *evt)
@@ -536,8 +514,9 @@ static void on_capability_get(const struct nrf_modem_dect_phy_capability_get_eve
             mcs max:             %d\n\
             current mcs:         %d\n\
             mu:                  %d\n\
-            beta:                %d\n", 
-            capa->variant[0].rx_spatial_streams, capa->variant[0].mcs_max, knobs.mcs, capa->variant[0].mu, capa->variant[0].mcs_max);
+            beta:                %d\n\
+            bytes per tx:        %d\n", 
+            capa->variant[0].rx_spatial_streams, capa->variant[0].mcs_max, knobs.mcs, capa->variant[0].mu, capa->variant[0].mcs_max, mcsToBytesPerSlot[knobs.mcs]);
 
     mcs_max = capa->variant[0].mcs_max;
   }
@@ -588,19 +567,6 @@ static void on_latency_info_get(const struct nrf_modem_dect_phy_latency_info_eve
             DECT_GAP_TICK, 
             opTransitionLatency, opStartupLatency, tx_idleToActiveLatency, tx_activeToIdleLatency, rx_idleToActiveLatency, rx_activeToIdleLatency,
             modem_time, k_uptime_ticks(), (uint64_t)(NRF_MODEM_DECT_MODEM_TIME_TICK_RATE_KHZ), (uint64_t) (CONFIG_SYS_CLOCK_TICKS_PER_SEC / 1000));
-
-    // genericBeaconScheduleOffset = DECT_MASTER_BEACON_PERIOD_TICK; // Currently unused
-    // genericTxScheduleOffset = tx_activeToIdleLatency + rx_idleToActiveLatency + DECT_SLOT_DURATION_TICK + rx_activeToIdleLatency + (10 * DECT_GAP_TICK);
-    // genericRxScheduleOffset = rx_activeToIdleLatency + tx_idleToActiveLatency + DECT_SLOT_DURATION_TICK + rx_activeToIdleLatency + (65 * DECT_GAP_TICK);
-    // genericRxDuration = DECT_SLOT_DURATION_TICK + 30 * DECT_GAP_TICK;
-    //
-    // genericRelativeRxSchedule = opTransitionLatency + 3 * DECT_GAP_TICK;
-    //
-    // genericTxScheduleOffset += DECT_GUARD_TIME;
-    // genericRxScheduleOffset += DECT_GUARD_TIME;
-    // genericRxDuration += DECT_GUARD_TIME;
-    // genericTxScheduleOffset = DECT_SLOT_DURATION_TICK + opTransitionLatency;
-    // genericRelativeRxSchedule = opTransitionLatency;
   }
   k_sem_give(&operation_sem);
 }
@@ -777,23 +743,10 @@ int DectPhy_Init(void)
   return 0;
 }
 
-static void test_point_thread(void)
-{
-  // while(gpio_pin_get_dt(slotSwitch) == GPIO_OUTPUT_INACTIVE){}
-  while(true)
-  {
-    // gpio_pin_toggle_dt(slotSwitch);
-    k_sleep(K_USEC(DECT_SLOT_DURATION_US));
-  }
-}
-K_KERNEL_STACK_MEMBER(testPointThreadStack, 256); // JON pound define
-static struct k_thread testPointThreadHandle;
-
 bool DectPhy_WiznetAlert(void) // TODO better way of doing this
 {
   return true;
 }
-
 
 static int cmd_bridge(const struct shell *shell, size_t argc, char **argv)
 {
@@ -827,20 +780,12 @@ void DectPhy_Main(bool master)
 {	
   set_all_tps(0);
 
-	//  k_thread_create(&testPointThreadHandle, testPointThreadStack, 
-	// 		256,
-	// 		test_point_thread,
-	// 		NULL, NULL, NULL,
-	// 		K_PRIO_COOP(2),
-	// 		0, K_NO_WAIT);
-	// k_thread_name_set(&testPointThreadHandle, "test_point_thread");
-
   DectPhy_Init();
   int err;
   iAmFt = master;
 
   sprintf(master_beacon.magic, "BEAC"); 
-  master_beacon.ops_per_beacon = DECT_OPS_PER_BEACON;
+  master_beacon.ops_per_beacon = knobs.ops_per_beacon;
 
   if (iAmFt) // TODO currently these dont do anythying
   {

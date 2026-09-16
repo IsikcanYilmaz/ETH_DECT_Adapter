@@ -40,11 +40,27 @@
 
 #define DECT_BEACON_MAGIC_STRING ("BEAC")
 
-// TODO decide what to do with these
+// DECT PDUs and Message structures
+// This is the frame structure that we encapsulate every piece of data we send over DECT with
+#define DECT_DATA_PACKET_FLAG_BIT 0
+#define DECT_BEACON_FLAG_BIT 1
+#define DECT_FRAG_HEADER_EXISTS_FLAG_BIT 2
 typedef struct DectPacket_s
 {
-  
-} DectPacket_t;
+  uint8_t flags;
+  uint8_t payloadSize; // This includes every header + payload data
+  char payload[];
+} __attribute__((packed)) DectPacket_t;
+
+// JON Follow
+// Fragmentation. Multiplexing and assembly DECT 2020 MAC Layer, section 6.3.4 MAC multiplexing header 
+// We currently dont feel the need to follow this, since the top MCS we can get is 4, and per slot we can pack 117 bytes
+typedef struct DectFragmentationHeader_s // Following loosely the rfc4944 https://www.rfc-editor.org/info/rfc4944/#section-5.3
+{
+  uint8_t datagramSize;   // Size of the higher layer datagram (after IP fragmentation) 
+  uint8_t datagramOffset; // Byte offset for this fragment
+  uint8_t datagramTag;    // A tag for the current datagram being transmitted / fragmented
+} __attribute__((packed)) DectFragmentationHeader_t;
 
 typedef struct DectBeaconMessage_s
 {
@@ -54,11 +70,6 @@ typedef struct DectBeaconMessage_s
   uint32_t modem_ticks_until_next_beacon; // 4 // NOTE since 32bit, it supports 62.13 seconds max
                                           // tbh the pt could infer this by itself also but idk
 } __attribute__((packed)) DectBeaconMessage_t;
-
-typedef struct DectTimesyncMessage_s
-{
-  
-} DectTimesyncMessage_t;
 
 typedef struct DectKnobs_s
 {
@@ -192,8 +203,8 @@ int DectPhy_Transmit(uint32_t handle, void *data, size_t data_len, uint64_t star
 int DectPhy_Receive(uint32_t handle, uint32_t durationTicks, uint64_t start_time);
 int DectPhy_ReceiveContinuous(uint32_t handle, uint32_t durationTicks, uint64_t start_time); 
 int DectPhy_TransmitHeadOfQueue(uint32_t handle, uint64_t start_time);
-int DectPhy_TransmitHeadOfQueueAndReceive(uint32_t handle_offset, uint64_t start_time_tx, uint64_t start_time_rx, uint32_t rx_duration);
 int DectPhy_TransmitBeacon(uint64_t start_time);
+int DectPhy_HandleIncomingPacketFragment(char *data, size_t len);
 
 // Util
 bool DectPhy_PktIsBeacon(char *pkt);
