@@ -40,7 +40,7 @@
 
 #define DECT_BEACON_MAGIC_STRING ("BEAC")
 
-// DECT PDUs and Message structures
+// DECT MAC Message structures
 // This is the frame structure that we encapsulate every piece of data we send over DECT with
 #define DECT_DATA_PACKET_FLAG_BIT 0
 #define DECT_BEACON_FLAG_BIT 1
