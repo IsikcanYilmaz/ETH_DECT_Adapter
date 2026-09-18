@@ -30,19 +30,6 @@ static void mock_pdc(const struct nrf_modem_dect_phy_pdc_event *evt)
   if (!DectPhy_PktIsNone(evt->data))
   {
     DectPhy_HandleIncomingPacketFragment(evt->data, evt->len);
-    // // We got a packet from the DECT connection. Enqueue it to wiznet's tx queue
-    // struct LeanWiznet_Packet *pkt = k_malloc(sizeof(struct LeanWiznet_Packet) + evt->len);
-    //
-    // if (pkt == NULL)
-    // {
-    //   LOG_ERR("%s: oom, cannot malloc", __FUNCTION__);
-    // }
-    // else
-    // {
-    //   memcpy(pkt->payload, evt->data, evt->len);
-    //   pkt->size = evt->len;
-    //   DectPhy_EnqueueEthTx(pkt);
-    // }
   }
 }
 

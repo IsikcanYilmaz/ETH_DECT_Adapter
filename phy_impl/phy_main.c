@@ -70,13 +70,13 @@ sys_slist_t ops_list;
 // FRAGMENTATION
 // Tx
 struct LeanWiznet_Packet *currentTxPacket = NULL;
-uint8_t currentTxDatagramOffset = 0;
-uint8_t currentTxDatagramTag = 0;
+uint16_t currentTxDatagramOffset = 0;
+uint16_t currentTxDatagramTag = 0;
 
 // Rx
 struct LeanWiznet_Packet *currentRxDatagram = NULL;
 uint8_t currentRxDatagramTag = 0;
-uint8_t currentRxDatagramOffset = 0;
+uint16_t currentRxDatagramOffset = 0;
 uint16_t currentRxDatagramSize = 0;
 
 // KNOBS
@@ -306,13 +306,18 @@ int DectPhy_TransmitHeadOfQueue(uint32_t handle, uint64_t start_time)
   // If we have an outgoing datagram loaded up, keep sending it. 
   size_t txSizePerMcs = mcsToBytesPerSlot[knobs.mcs];
   DectPacket_t *fragmentPkt = k_malloc(txSizePerMcs); 
+  if (fragmentPkt == NULL)
+  {
+    LOG_ERR("%s:%d OOM", __FUNCTION__, __LINE__);
+    return 1;
+  }
   // JON Interesting point here: apparently in 802.15.4 each frame carries data from exactly one datagram. 
   // Question is do we have to do it that way? Assume one slot we pack with the remaining bytes of a datagram, 2 bytes
   // the rest of the slot is going to be empty. Do we want this? Could it even be a paper? lol
   //
   // TODO JON no pack as many SDUs as you can here. But lets get one by one working
 
-  memset(fragmentPkt, 0x00, txSizePerMcs); // TODO remove this not needed
+  // memset(fragmentPkt, 0x00, txSizePerMcs); // TODO remove this not needed
   size_t effectivePayloadSize;
 
   // TODO JON Pack fragmentPkt with as many SDUs in a loop
@@ -342,6 +347,7 @@ int DectPhy_TransmitHeadOfQueue(uint32_t handle, uint64_t start_time)
     }
 
     // Construct the actual packet to be sent with the necessary headers
+    fragmentPkt->flags = 0;
     fragmentPkt->flags |= (1 << DECT_DATA_PACKET_FLAG_BIT);
     fragmentPkt->payloadSize = (needsFragmenting) ? (sizeof(DectFragmentationHeader_t) + effectivePayloadSize) : effectivePayloadSize;
     if (needsFragmenting)
@@ -350,7 +356,7 @@ int DectPhy_TransmitHeadOfQueue(uint32_t handle, uint64_t start_time)
       DectFragmentationHeader_t *fragHeader = (DectFragmentationHeader_t *) fragmentPkt->payload;
       fragHeader->datagramSize = currentTxPacket->size;
       fragHeader->datagramOffset = currentTxDatagramOffset;
-      fragHeader->datagramTag = currentTxDatagramTag;
+      // fragHeader->datagramTag = currentTxDatagramTag;
     }
     memcpy(((uint8_t *) fragmentPkt) + overheadHeaderSize, (char *) (currentTxPacket->payload + currentTxDatagramOffset), effectivePayloadSize);
 
@@ -442,7 +448,8 @@ int DectPhy_HandleIncomingPacketFragment(char *data, size_t len)
   char *sduPayload = (isFragmented) ? ((char *) dectPkt->payload) + (sizeof(DectFragmentationHeader_t)) : ((char *) dectPkt->payload);
   size_t sduSize = dectPkt->payloadSize;
   
-  LOG_DBG("RECEIVED DATA %d B. %s %s", dectPkt->payloadSize, (isDataPacket) ? "[DATA]":"", (isFragmented) ? "[FRAG]":"");
+  LOG_DBG("RECEIVED DATA %d B. %s %s", sduSize, (isDataPacket) ? "[DATA]":"", (isFragmented) ? "[FRAG]":"");
+  LOG_HEXDUMP_DBG(data, len, "FUNNEL");
 
   // We just received some SDU data. now we either
   // 1) were expecting any data which is the best case
@@ -459,23 +466,48 @@ int DectPhy_HandleIncomingPacketFragment(char *data, size_t len)
   // If we have nothing being reassembled or received, malloc something for it.
   if (currentRxDatagram == NULL)
   {
-    currentRxDatagramSize = (isFragmented) ? fragHeader->datagramSize : dectPkt->payloadSize;
+    currentRxDatagramSize = (isFragmented) ? fragHeader->datagramSize : sduSize;
+    currentRxDatagramOffset = 0;
     currentRxDatagram = (struct LeanWiznet_Packet *) k_malloc(sizeof(struct LeanWiznet_Packet) + currentRxDatagramSize);
-    memset(currentRxDatagram, 0x00, currentRxDatagramSize); // TODO unnecessary time spent remove this
-    LOG_DBG("ASSEMBLING NEW PACKET. DATAGRAM SIZE %d, FRAGMENT SIZE %d", currentRxDatagramSize);
+    if (currentRxDatagram == NULL)
+    {
+      LOG_ERR("%s:%d OOM", __FUNCTION__, __LINE__);
+      return 1;
+    }
+    LOG_DBG("%sNEW PACKET. DATAGRAM SIZE %d", (isFragmented) ? "ASSEMBLING " : "", currentRxDatagramSize);
   }
 
   if (isFragmented) 
   {
     // If the SDU we got is a fragment AND we're already reassembling another packet
+    if (sduSize < sizeof(DectFragmentationHeader_t)) // Sanity check
+    {
+      LOG_ERR("%s:%d Bad SDU Size %d!", __FUNCTION__, __LINE__, sduSize);
+      LOG_HEXDUMP_ERR(data, len, "BAD PKT");
+      k_free(currentRxDatagram);
+      currentRxDatagram = NULL;
+      return 1;
+    }
     sduSize -= sizeof(DectFragmentationHeader_t);
-    LOG_DBG("FRAGMENT: OFFSET %d, SIZE %d, TAG %d, FRAGMENT PL SIZE %d", fragHeader->datagramOffset, fragHeader->datagramSize, fragHeader->datagramTag, sduSize);
+    LOG_DBG("FRAGMENT: OFFSET %d, SIZE %d, FRAGMENT PL SIZE %d", fragHeader->datagramOffset, fragHeader->datagramSize, sduSize);
 
-    memcpy((char *) (currentRxDatagram->payload) + fragHeader->datagramOffset, sduPayload, sduSize);
+    if (fragHeader->datagramOffset + sduSize < currentRxDatagramSize)
+    {
+      memcpy((char *) (currentRxDatagram->payload) + fragHeader->datagramOffset, sduPayload, sduSize);
+    }
+    else
+    {
+      LOG_ERR("%s:%d bad datagram offset! %d", __FUNCTION__, __LINE__, fragHeader->datagramOffset);
+      LOG_HEXDUMP_ERR(data, len, "ERR"); 
+      k_free(currentRxDatagram);
+      currentRxDatagram = NULL;
+      return 1;
+    }
+
     LOG_HEXDUMP_DBG(currentRxDatagram->payload, currentRxDatagramSize, "REASSEMBLY IN PROGRESS");
 
     currentRxDatagramOffset += sduSize;
-    if (currentRxDatagramOffset == currentRxDatagramSize)
+    if (currentRxDatagramOffset >= currentRxDatagramSize) // should match exactly actually
     {
       reassemblyComplete = true;
     }

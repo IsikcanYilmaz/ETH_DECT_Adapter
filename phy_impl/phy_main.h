@@ -57,9 +57,9 @@ typedef struct DectPacket_s
 // We currently dont feel the need to follow this, since the top MCS we can get is 4, and per slot we can pack 117 bytes
 typedef struct DectFragmentationHeader_s // Following loosely the rfc4944 https://www.rfc-editor.org/info/rfc4944/#section-5.3
 {
-  uint8_t datagramSize;   // Size of the higher layer datagram (after IP fragmentation) 
-  uint8_t datagramOffset; // Byte offset for this fragment
-  uint8_t datagramTag;    // A tag for the current datagram being transmitted / fragmented
+  uint16_t datagramSize;   // Size of the higher layer datagram (after IP fragmentation) 
+  uint16_t datagramOffset; // Byte offset for this fragment
+  // uint8_t datagramTag;    // A tag for the current datagram being transmitted / fragmented // We can take this in later
 } __attribute__((packed)) DectFragmentationHeader_t;
 
 typedef struct DectBeaconMessage_s

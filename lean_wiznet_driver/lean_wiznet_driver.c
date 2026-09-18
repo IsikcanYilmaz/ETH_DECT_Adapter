@@ -65,7 +65,7 @@ static const struct LeanWiznet_config leanwiznet_0_config = {
 
 static RxHappenedCallback rxcb = NULL; 
 
-K_QUEUE_DEFINE(ethRxQueue);
+K_QUEUE_DEFINE(ethRxQueue); // JON TODO P2: Instead of k_queues use k_msg_queue and just malloc every new packet
 K_QUEUE_DEFINE(ethTxQueue);
 
 static int w5500_spi_read(struct LeanWiznet_config *cfg, uint32_t addr,uint8_t *data, size_t len)
