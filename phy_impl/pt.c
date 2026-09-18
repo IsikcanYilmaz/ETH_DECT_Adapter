@@ -6,6 +6,7 @@
 #include <zephyr/logging/log.h>
 #include <zephyr/drivers/hwinfo.h>
 #include <zephyr/drivers/gpio.h>
+#include <zephyr/sys/reboot.h>
 
 LOG_MODULE_REGISTER(dect_phy_pt, LOG_LEVEL_WRN);
 
@@ -160,8 +161,8 @@ static void mock_pdc(const struct nrf_modem_dect_phy_pdc_event *evt) // TODO mak
 
     if (!DectPhy_PktIsNone(evt->data))
     {
-      LOG_WRN("PT RECEIVED %d BYTES FROM FT IN SLOT %d", evt->len, slotCounter);
-      LOG_HEXDUMP_WRN(evt->data, evt->len, "RX");
+      LOG_DBG("PT RECEIVED %d BYTES FROM FT IN SLOT %d", evt->len, slotCounter);
+      LOG_HEXDUMP_DBG(evt->data, evt->len, "RX");
 
       DectPhy_HandleIncomingPacketFragment(evt->data, evt->len);
 
@@ -234,6 +235,8 @@ static void mock_complete(const struct nrf_modem_dect_phy_op_complete_event *evt
   {
     gpio_pin_toggle_dt(ptDlSwitch);
     LOG_ERR("%d DOWNLINK SLOT COULDNT RECEIVE DATA", evt->handle);
+    sys_reboot(SYS_REBOOT_COLD); // TODO REAALLY Bad... but for now lets just reboot if we go out of sync 
+    // TODO handle the cases where we either miss a beacon or we miss a DL RX
   }
 
   if (ptState == PT_STATE_TEST) // TODO remove

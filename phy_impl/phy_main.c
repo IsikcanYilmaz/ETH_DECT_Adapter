@@ -8,6 +8,7 @@
 #include <zephyr/drivers/hwinfo.h>
 #include <zephyr/drivers/gpio.h>
 #include <zephyr/shell/shell.h>
+#include <zephyr/sys/reboot.h>
 #include "lean_wiznet_driver.h"
 #include "phy_main.h"
 #include "pt.h"
@@ -67,9 +68,16 @@ int mcs_max = -1;
 sys_slist_t ops_list;
 
 // FRAGMENTATION
+// Tx
 struct LeanWiznet_Packet *currentTxPacket = NULL;
-uint8_t currentDatagramOffset = 0;
-uint8_t currentDatagramTag = 0;
+uint8_t currentTxDatagramOffset = 0;
+uint8_t currentTxDatagramTag = 0;
+
+// Rx
+struct LeanWiznet_Packet *currentRxDatagram = NULL;
+uint8_t currentRxDatagramTag = 0;
+uint8_t currentRxDatagramOffset = 0;
+uint16_t currentRxDatagramSize = 0;
 
 // KNOBS
 DectKnobs_t knobs = {
@@ -313,24 +321,24 @@ int DectPhy_TransmitHeadOfQueue(uint32_t handle, uint64_t start_time)
   if (currentTxPacket == NULL && !k_queue_is_empty(&ethRxQueue))
   {
     currentTxPacket = (struct LeanWiznet_Packet *) k_queue_get(&ethRxQueue, K_FOREVER);
-    currentDatagramOffset = 0;
-    LOG_WRN("LOADED UP DATAGRAM %d. %d BYTES", currentDatagramTag, currentTxPacket->size);
-    LOG_HEXDUMP_WRN(currentTxPacket->payload, currentTxPacket->size, "FULL DATAGRAM");
+    currentTxDatagramOffset = 0;
+    LOG_DBG("LOADED UP DATAGRAM %d. %d BYTES", currentTxDatagramTag, currentTxPacket->size);
+    LOG_HEXDUMP_DBG(currentTxPacket->payload, currentTxPacket->size, "FULL DATAGRAM");
   }
 
   if (currentTxPacket)
   {
     // First decide if it needs to be fragmented.
-    bool needsFragmenting = (currentDatagramOffset || currentTxPacket->size > (txSizePerMcs - sizeof(DectPacket_t)));
+    bool needsFragmenting = (currentTxDatagramOffset || currentTxPacket->size > (txSizePerMcs - sizeof(DectPacket_t)));
 
     // Find the available payload size
     size_t overheadHeaderSize = (needsFragmenting) ? (sizeof(DectFragmentationHeader_t) + sizeof(DectPacket_t)) : (sizeof(DectPacket_t));
     effectivePayloadSize = txSizePerMcs - overheadHeaderSize;
 
     // Check if we can pack the remaining bytes in this fragment
-    if (currentTxPacket->size - currentDatagramOffset < effectivePayloadSize)
+    if (currentTxPacket->size - currentTxDatagramOffset < effectivePayloadSize)
     {
-      effectivePayloadSize = currentTxPacket->size - currentDatagramOffset;
+      effectivePayloadSize = currentTxPacket->size - currentTxDatagramOffset;
     }
 
     // Construct the actual packet to be sent with the necessary headers
@@ -341,24 +349,24 @@ int DectPhy_TransmitHeadOfQueue(uint32_t handle, uint64_t start_time)
       fragmentPkt->flags |= (1 << DECT_FRAG_HEADER_EXISTS_FLAG_BIT);
       DectFragmentationHeader_t *fragHeader = (DectFragmentationHeader_t *) fragmentPkt->payload;
       fragHeader->datagramSize = currentTxPacket->size;
-      fragHeader->datagramOffset = currentDatagramOffset;
-      fragHeader->datagramTag = currentDatagramTag;
+      fragHeader->datagramOffset = currentTxDatagramOffset;
+      fragHeader->datagramTag = currentTxDatagramTag;
     }
-    memcpy(((uint8_t *) fragmentPkt) + overheadHeaderSize, (char *) (currentTxPacket->payload + currentDatagramOffset), effectivePayloadSize);
+    memcpy(((uint8_t *) fragmentPkt) + overheadHeaderSize, (char *) (currentTxPacket->payload + currentTxDatagramOffset), effectivePayloadSize);
 
-    LOG_WRN("FROM OFFSET %d, %d BYTES SENT OF %d. (Header %d: flags 0x%x, plSize %d, totalSize %d)", currentDatagramOffset, effectivePayloadSize, currentTxPacket->size, overheadHeaderSize, fragmentPkt->flags, fragmentPkt->payloadSize, effectivePayloadSize + overheadHeaderSize);
-    LOG_HEXDUMP_WRN(fragmentPkt, txSizePerMcs, "FRAGPKT");
+    LOG_DBG("FROM OFFSET %d, %d BYTES SENT OF %d. (Header %d: flags 0x%x, plSize %d, totalSize %d)", currentTxDatagramOffset, effectivePayloadSize, currentTxPacket->size, overheadHeaderSize, fragmentPkt->flags, fragmentPkt->payloadSize, effectivePayloadSize + overheadHeaderSize);
+    LOG_HEXDUMP_DBG(fragmentPkt, txSizePerMcs, "FRAGPKT");
 
     err = DectPhy_Transmit(handle, fragmentPkt, txSizePerMcs, start_time);
 
-    currentDatagramOffset += effectivePayloadSize;
-    if (currentDatagramOffset >= currentTxPacket->size)
+    currentTxDatagramOffset += effectivePayloadSize;
+    if (currentTxDatagramOffset >= currentTxPacket->size)
     {
-      LOG_WRN("ALL FRAGMENTS OF TAG %d TRANSMITTED", currentDatagramTag);
-      currentDatagramTag++;
+      LOG_DBG("ALL FRAGMENTS OF TAG %d TRANSMITTED", currentTxDatagramTag);
+      currentTxDatagramTag++;
       k_free(currentTxPacket);
       currentTxPacket = NULL;
-      currentDatagramOffset = 0;
+      currentTxDatagramOffset = 0;
     }
   }
   else
@@ -379,16 +387,6 @@ int DectPhy_TransmitBeacon(uint64_t start_time)
   master_beacon.this_beacon_time = start_time;
   uint32_t expected_next_beacon_offset = (uint32_t) beaconDelta; // TODO bad solution but will do. basically we're just sending the delta in ticks, between this xmit and the previous one. it worked
   master_beacon.modem_ticks_until_next_beacon = expected_next_beacon_offset;
-
-  static int ctr = 10;
-  static uint64_t ts;
-  if (ctr > 0)
-  {
-    LOG_WRN("Beacon @ %llu. Next expected at %llu", start_time, start_time + beaconDelta);
-    LOG_WRN("Beacondelta %llu txdelta %llu rxdelta %llu", beaconDelta, txDelta, rxDelta);
-    ctr--;
-    ts = modem_time;
-  }
 
   // TODO make these generic, reuse
   struct phy_ctrl_field_common header = {
@@ -431,40 +429,74 @@ void DectPhy_EnqueueEthTx(void *pkt)
   k_queue_append(&ethTxQueue, pkt);
 }
 
+// This is the funnel that should handle all higher layer data to be then passed along to the Wiznet shield
 int DectPhy_HandleIncomingPacketFragment(char *data, size_t len)
 {
   int err = 0;
+  DectPacket_t *dectPkt = (DectPacket_t *) data;
 
-  DectPacket_t *dectpkt = (DectPacket_t *) data;
-
-  bool isDataPacket = ((dectpkt->flags & (1 << DECT_DATA_PACKET_FLAG_BIT)) > 0);
-  bool isFragmented = ((dectpkt->flags & (1 << DECT_FRAG_HEADER_EXISTS_FLAG_BIT)) > 0);
+  bool isDataPacket = ((dectPkt->flags & (1 << DECT_DATA_PACKET_FLAG_BIT)) > 0);
+  bool isFragmented = ((dectPkt->flags & (1 << DECT_FRAG_HEADER_EXISTS_FLAG_BIT)) > 0);
   bool reassemblyComplete = (!isFragmented);
-  size_t sduSize = dectpkt->payloadSize;
+  DectFragmentationHeader_t *fragHeader = (isFragmented) ? (DectFragmentationHeader_t *) (dectPkt->payload) : NULL;
+  char *sduPayload = (isFragmented) ? ((char *) dectPkt->payload) + (sizeof(DectFragmentationHeader_t)) : ((char *) dectPkt->payload);
+  size_t sduSize = dectPkt->payloadSize;
   
-  LOG_WRN("RECEIVED DATA %d. %s %s", dectpkt->payloadSize, (isDataPacket) ? "IS_DATA":"", (isFragmented) ? "IS_FRAG":"");
+  LOG_DBG("RECEIVED DATA %d B. %s %s", dectPkt->payloadSize, (isDataPacket) ? "[DATA]":"", (isFragmented) ? "[FRAG]":"");
 
-  if (isFragmented)
+  // We just received some SDU data. now we either
+  // 1) were expecting any data which is the best case
+  // 2) were expecting the next fragment of a packet we've been reassembling 
+  //
+  // The data we got is either
+  // a) is fragmented
+  // b) is a full datagram
+  //
+  // we could notify this layer if we ever miss a slot or something. maybe that's the way to go
+  
+  // Figure out the datagram size
+
+  // If we have nothing being reassembled or received, malloc something for it.
+  if (currentRxDatagram == NULL)
   {
-    DectFragmentationHeader_t *fragHeader = (DectFragmentationHeader_t *) (dectpkt->payload);
+    currentRxDatagramSize = (isFragmented) ? fragHeader->datagramSize : dectPkt->payloadSize;
+    currentRxDatagram = (struct LeanWiznet_Packet *) k_malloc(sizeof(struct LeanWiznet_Packet) + currentRxDatagramSize);
+    memset(currentRxDatagram, 0x00, currentRxDatagramSize); // TODO unnecessary time spent remove this
+    LOG_DBG("ASSEMBLING NEW PACKET. DATAGRAM SIZE %d, FRAGMENT SIZE %d", currentRxDatagramSize);
+  }
+
+  if (isFragmented) 
+  {
+    // If the SDU we got is a fragment AND we're already reassembling another packet
     sduSize -= sizeof(DectFragmentationHeader_t);
-    LOG_WRN("FRAGMENT: OFFSET %d, SIZE %d, TAG %d, FRAGMENT PL SIZE %d", fragHeader->datagramOffset, fragHeader->datagramSize, fragHeader->datagramTag, sduSize);
+    LOG_DBG("FRAGMENT: OFFSET %d, SIZE %d, TAG %d, FRAGMENT PL SIZE %d", fragHeader->datagramOffset, fragHeader->datagramSize, fragHeader->datagramTag, sduSize);
+
+    memcpy((char *) (currentRxDatagram->payload) + fragHeader->datagramOffset, sduPayload, sduSize);
+    LOG_HEXDUMP_DBG(currentRxDatagram->payload, currentRxDatagramSize, "REASSEMBLY IN PROGRESS");
+
+    currentRxDatagramOffset += sduSize;
+    if (currentRxDatagramOffset == currentRxDatagramSize)
+    {
+      reassemblyComplete = true;
+    }
+  }
+  else
+  {
+    // JON TODO POTENTIAL BUG: When implementing frame packing note that here: if we get a nonfragmented tx, we assume we can fill up the entire datagram buffer with it. 
+    memcpy((char *) (currentRxDatagram->payload), sduPayload, sduSize);
   }
 
   if (reassemblyComplete)
   {
-    LOG_WRN("REASSEMBLY COMPLETE. SENDING OFF %d BYTES TO ETH", sduSize);
-    // struct LeanWiznet_Packet *wiznetpkt = k_malloc(sizeof(struct LeanWiznet_Packet) + sduSize);
-    // if (wiznetpkt == NULL)
-    // {
-    //   LOG_ERR("%s:%d out of memory! cannot malloc %d bytes", __FUNCTION__, __LINE__, len + sizeof(struct LeanWiznet_Packet));
-    // }
-    // else
-    // {
-    //   memcpy(wiznetpkt->payload, dectpkt->data, sduSize);
-    //   wiznetpkt->size = sduSize;
-    //   DectPhy_EnqueueEthTx(wiznetpkt);
-    // }
+    LOG_DBG("REASSEMBLY COMPLETE. SENDING OFF %d BYTES TO ETH", currentRxDatagramSize);
+    LOG_HEXDUMP_DBG(currentRxDatagram->payload, currentRxDatagramSize, "REASSEMBLY COMPLETE");
+    
+    currentRxDatagram->size = currentRxDatagramSize;
+    DectPhy_EnqueueEthTx(currentRxDatagram); // This pointer will be freed by LeanWiznet driver
+    currentRxDatagram = NULL;
+    currentRxDatagramSize = 0;
+    currentRxDatagramOffset = 0;
+    currentRxDatagramTag = 0;
   }
 
   return err;
@@ -750,11 +782,15 @@ bool DectPhy_WiznetAlert(void) // TODO better way of doing this
 
 static int cmd_bridge(const struct shell *shell, size_t argc, char **argv)
 {
-  if (argc == 0 || strcmp(argv[1], "status") == 0)
+  // If ran without args it will print the status
+  if (argc == 0)
   {
     shell_print(shell, "Dect Bridge status:");
     shell_print(shell, "I am : %s", (iAmFt) ? "FT" : "PT");
+    return 0;
   }
+
+  // These require args
   if (strncmp(argv[1], "mcs", 3) == 0)
   {
     if (argc == 2)
@@ -771,10 +807,14 @@ static int cmd_bridge(const struct shell *shell, size_t argc, char **argv)
       }
     }
   }
+  if (strncmp(argv[1], "reboot", 6) == 0)
+  {
+    sys_reboot(SYS_REBOOT_COLD);
+  }
   return 0;
 }
 
-SHELL_CMD_ARG_REGISTER(bridge, NULL, "bridge <subcommand>", cmd_bridge, 2, 32);
+SHELL_CMD_ARG_REGISTER(bridge, NULL, "bridge <subcommand>", cmd_bridge, 1, 32);
 
 void DectPhy_Main(bool master)
 {	

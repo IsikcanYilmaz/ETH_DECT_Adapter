@@ -9,6 +9,12 @@
 
 LOG_MODULE_REGISTER(dect_phy_ft, LOG_LEVEL_WRN);
 
+// FT Timing related. TODO maybe move elsewhere? 
+uint64_t base;
+uint64_t beaconSchedule;
+uint64_t dlSchedule;
+uint64_t ulSchedule;
+
 static void on_pcc_ft(const struct nrf_modem_dect_phy_pcc_event *evt)
 {
 	LOG_INF("PCC Received header from device ID %d", evt->hdr.hdr_type_1.transmitter_id_hi << 8 | evt->hdr.hdr_type_1.transmitter_id_lo);
@@ -23,19 +29,20 @@ static void mock_pdc(const struct nrf_modem_dect_phy_pdc_event *evt)
   LOG_HEXDUMP_DBG(evt->data, evt->len, "RX");
   if (!DectPhy_PktIsNone(evt->data))
   {
-    // We got a packet from the DECT connection. Enqueue it to wiznet's tx queue
-    struct LeanWiznet_Packet *pkt = k_malloc(sizeof(struct LeanWiznet_Packet) + evt->len);
-
-    if (pkt == NULL)
-    {
-      LOG_ERR("%s: oom, cannot malloc", __FUNCTION__);
-    }
-    else
-    {
-      memcpy(pkt->payload, evt->data, evt->len);
-      pkt->size = evt->len;
-      DectPhy_EnqueueEthTx(pkt);
-    }
+    DectPhy_HandleIncomingPacketFragment(evt->data, evt->len);
+    // // We got a packet from the DECT connection. Enqueue it to wiznet's tx queue
+    // struct LeanWiznet_Packet *pkt = k_malloc(sizeof(struct LeanWiznet_Packet) + evt->len);
+    //
+    // if (pkt == NULL)
+    // {
+    //   LOG_ERR("%s: oom, cannot malloc", __FUNCTION__);
+    // }
+    // else
+    // {
+    //   memcpy(pkt->payload, evt->data, evt->len);
+    //   pkt->size = evt->len;
+    //   DectPhy_EnqueueEthTx(pkt);
+    // }
   }
 }
 
@@ -48,26 +55,6 @@ static void mock_pcc(const struct nrf_modem_dect_phy_pcc_event *evt)
   LOG_DBG("PCC %d @ %llu", evt->header_status, modem_time);
 }
 
-// TODO move this up // TODO clean
-uint64_t base;
-uint64_t beaconScheduleOffset;
-uint64_t beaconSchedule;
-uint64_t beaconExpEnding;
-
-uint64_t dlSchedule;
-uint64_t dlScheduleOffset;
-uint64_t dlExpEnding;
-
-uint64_t ulSchedule;
-uint64_t ulScheduleOffset;
-uint64_t ulExpEnding;
-
-uint64_t relativeUlSchedule; // relative to the tx prior
-uint64_t rxDuration;
-
-uint64_t nextDlTxModemTick;
-uint64_t nextUlRxModemTick;
-
 static void mock_complete(const struct nrf_modem_dect_phy_op_complete_event *evt)
 {
   int err;
@@ -78,15 +65,6 @@ static void mock_complete(const struct nrf_modem_dect_phy_op_complete_event *evt
     LOG_ERR("%s ERROR %x HANDLE %d @ MT %llu", __FUNCTION__, evt->err, evt->handle, modem_time);
     return;
   }
-  
-  static int printcount = 60;
-  static uint64_t lastopcomplete = 0;
-  if (printcount)
-  {
-    // LOG_WRN("OP %d COMPLETE @ %llu Diff %llu ", evt->handle, modem_time, modem_time - lastopcomplete);
-    lastopcomplete = modem_time;
-    printcount--;
-  }
 
   if (evt->handle == BEACON_TX_HANDLE) /////////////////////////////////////// BEAC //
   {
@@ -94,8 +72,6 @@ static void mock_complete(const struct nrf_modem_dect_phy_op_complete_event *evt
 
     beaconDelta = modem_time - lastBeaconCplt; 
     lastBeaconCplt = modem_time;
-
-    // LOG_WRN("%s @ MT: %llu HANDLE BEACON (%lli)", __FUNCTION__, modem_time, beaconExpEnding - modem_time);
   }
   else if (IS_TX_HANDLE(evt->handle)) /////////////////////////////////////// TX //
   {
@@ -122,7 +98,6 @@ static void mock_complete(const struct nrf_modem_dect_phy_op_complete_event *evt
     }
     else // OPS PER BEACON DONE
     {
-      // return; // TODO remove   
       slotCounter = DECT_OPS_PER_BEACON;
       beaconSchedule = modem_time + opTransitionLatency + DECT_HEADROOM + DECT_SLOT_DURATION_TICK + DECT_HEADROOM + opTransitionLatency;
       dlSchedule = beaconSchedule + DECT_SLOT_DURATION_TICK + DECT_HEADROOM + opTransitionLatency + DECT_HEADROOM;
@@ -132,7 +107,6 @@ static void mock_complete(const struct nrf_modem_dect_phy_op_complete_event *evt
       err |= DectPhy_TransmitHeadOfQueue(FT_TX_HANDLE + slotCounter, dlSchedule);
       err |= DectPhy_Receive(FT_RX_HANDLE + slotCounter, genericRxDuration, ulSchedule);
     }
-    // // LOG_ERR("%s @ MT: %llu HANDLE DLTX (%lli). %llu - %llu", __FUNCTION__, modem_time, modem_time - dlExpEnding, nextDlTxModemTick, nextDlTxModemTick + DECT_SLOT_DURATION_TICK);
     DectPhy_InFlightCompleted();
   }
   else if (IS_RX_HANDLE(evt->handle)) /////////////////////////////////////// RX ///////////////////////////////////////
@@ -140,8 +114,6 @@ static void mock_complete(const struct nrf_modem_dect_phy_op_complete_event *evt
     gpio_pin_toggle_dt(ulSwitch);
     rxDelta = modem_time - lastRxCplt;
     lastRxCplt = modem_time;
-    
-    // LOG_ERR("%s @ MT: %llu HANDLE ULRX (%lli). %llu - %llu", __FUNCTION__, modem_time, diff, nextUlRxModemTick, nextUlRxModemTick + DECT_SLOT_DURATION_TICK);
   }
 
   k_sem_give(&operation_sem);
@@ -211,8 +183,6 @@ void Ft_HandleEvent(const struct nrf_modem_dect_phy_event *evt)
 
 void Ft_Init(void)
 {
-  // DectPhy_Transmit(GARBAGE_HANDLE, "GARBAGE", 7, 0); // TODO For some reason, the Very first transmission contains garbage data. maybe the buffer needs flushing somehow. this does that. awful solution replace it
-  // k_sem_take(&operation_sem, K_FOREVER);
   slotCounter = DECT_OPS_PER_BEACON;
 }
 
