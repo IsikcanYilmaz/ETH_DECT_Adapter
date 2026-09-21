@@ -621,7 +621,7 @@ static void on_latency_info_get(const struct nrf_modem_dect_phy_latency_info_eve
     rx_activeToIdleLatency = latencyInfo.operation.receive.active_to_idle_rx;
     LOG_WRN("Latency info: \n\
             slot_ticks:              %llu\n\
-            gap_ticks:               %llu\n\
+            headroom_ticks:               %llu\n\
             scheduled_op_transition: %d\n\
             op_startup:              %d\n\
             tx_idleToActiveLatency:  %d\n\
@@ -633,7 +633,7 @@ static void on_latency_info_get(const struct nrf_modem_dect_phy_latency_info_eve
             modem ticks per ms:      %llu\n\
             host ticks per ms:       %llu\n", 
             DECT_SLOT_DURATION_TICK, 
-            DECT_GAP_TICK, 
+            DECT_HEADROOM, 
             opTransitionLatency, opStartupLatency, tx_idleToActiveLatency, tx_activeToIdleLatency, rx_idleToActiveLatency, rx_activeToIdleLatency,
             modem_time, k_uptime_ticks(), (uint64_t)(NRF_MODEM_DECT_MODEM_TIME_TICK_RATE_KHZ), (uint64_t) (CONFIG_SYS_CLOCK_TICKS_PER_SEC / 1000));
   }
