@@ -128,7 +128,6 @@ uint64_t pccPdcDiff = 0;
 uint32_t lastBeaconTs = 0;
 
 uint64_t genericBeaconScheduleOffset;
-uint64_t genericTxScheduleOffset;
 uint64_t genericRxScheduleOffset;
 uint64_t genericRxDuration;
 uint64_t genericRelativeRxSchedule;

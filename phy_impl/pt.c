@@ -16,11 +16,10 @@ static void on_time_get_pt(const struct nrf_modem_dect_phy_time_get_event *evt)
 	LOG_DBG("time_get cb time %"PRIu64" status %x", modem_time, evt->err);
   blockTicks = DECT_SLOT_DURATION_TICK + opTransitionLatency + DECT_HEADROOM;
 
-  genericTxScheduleOffset = DECT_SLOT_DURATION_TICK + opTransitionLatency + DECT_HEADROOM;
   genericRelativeRxSchedule = opTransitionLatency;
   genericRxDuration = DECT_SLOT_DURATION_TICK + DECT_HEADROOM;
 
-  LOG_WRN("genericTxScheduleOffset: %llu\ngenericRxDuration: %llu\nheadroom: %llu\nblock: %llu", genericTxScheduleOffset, genericRxDuration, DECT_HEADROOM, blockTicks);
+  LOG_WRN("genericRxDuration: %llu\nheadroom: %llu\nblock: %llu", genericRxDuration, DECT_HEADROOM, blockTicks);
 
   warmedUp = true;
   k_sem_give(&time_sem);
@@ -61,8 +60,8 @@ static void mock_pdc(const struct nrf_modem_dect_phy_pdc_event *evt) // TODO mak
       slotCounter = numSlotsInFrame;
 
       uint64_t dlRxDuration = DECT_SLOT_DURATION_TICK + DECT_HEADROOM;
-      uint64_t dlRxStart = next_beacon_tick + opTransitionLatency + dlRxDuration + opTransitionLatency;
-      uint64_t ulTxStart = dlRxStart + dlRxDuration + opTransitionLatency + (DECT_HALF_HEADROOM);
+      uint64_t dlRxStart = next_beacon_tick + DECT_SLOT_DURATION_TICK + DECT_HEADROOM + opTransitionLatency;
+      uint64_t ulTxStart = dlRxStart + DECT_SLOT_DURATION_TICK + DECT_HEADROOM + opTransitionLatency + (DECT_HALF_HEADROOM);
 
       firstbuf[5] = slotCounter;
       err = DectPhy_Receive(BEACON_LATCH_RX_HANDLE, dlRxDuration, next_beacon_tick); // SUCCESSFULLY RECEIVES

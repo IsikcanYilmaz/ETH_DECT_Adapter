@@ -72,13 +72,13 @@ static void mock_complete(const struct nrf_modem_dect_phy_op_complete_event *evt
       //       v
       // [DL  ]x[UL  ] [DL  ][UL  ] [DL][UL] [DL][UL] ...
       //              ^      ^
-      //           nextRx    |
+      //           nextTx    |
       //                     |
-      //                  nextTx
+      //                  nextRx
       
       txDelta = modem_time - lastTxCplt;
       lastTxCplt = modem_time;
-      dlSchedule = modem_time + opTransitionLatency + DECT_HEADROOM + DECT_SLOT_DURATION_TICK + opTransitionLatency + DECT_HEADROOM;
+      dlSchedule = modem_time + opTransitionLatency + DECT_HEADROOM + DECT_SLOT_DURATION_TICK + opTransitionLatency + DECT_HALF_HEADROOM;
       ulSchedule = modem_time + opTransitionLatency + DECT_HEADROOM + DECT_SLOT_DURATION_TICK + opTransitionLatency + DECT_SLOT_DURATION_TICK + DECT_HEADROOM + opTransitionLatency;
       err |= DectPhy_TransmitHeadOfQueue(FT_TX_HANDLE + slotCounter, dlSchedule);
       err |= DectPhy_Receive(FT_RX_HANDLE + slotCounter, genericRxDuration, ulSchedule);
@@ -87,7 +87,7 @@ static void mock_complete(const struct nrf_modem_dect_phy_op_complete_event *evt
     {
       slotCounter = DECT_OPS_PER_BEACON;
       beaconSchedule = modem_time + opTransitionLatency + DECT_HEADROOM + DECT_SLOT_DURATION_TICK + DECT_HEADROOM + opTransitionLatency;
-      dlSchedule = beaconSchedule + DECT_SLOT_DURATION_TICK + DECT_HEADROOM + opTransitionLatency + DECT_HEADROOM;
+      dlSchedule = beaconSchedule + DECT_SLOT_DURATION_TICK + DECT_HEADROOM + opTransitionLatency + DECT_HALF_HEADROOM;
       ulSchedule = beaconSchedule + DECT_SLOT_DURATION_TICK + DECT_HEADROOM + opTransitionLatency + DECT_SLOT_DURATION_TICK + DECT_HEADROOM + opTransitionLatency;
 
       err = DectPhy_TransmitBeacon(beaconSchedule);
@@ -119,15 +119,14 @@ static void mock_time_get(const struct nrf_modem_dect_phy_time_get_event *evt)
 
     base = modem_time + 1000 * DECT_SLOT_DURATION_TICK;
 
-    genericTxScheduleOffset = DECT_SLOT_DURATION_TICK + opTransitionLatency + DECT_HEADROOM;
     genericRelativeRxSchedule = opTransitionLatency; 
 
-    dlSchedule = base + DECT_SLOT_DURATION_TICK + DECT_HEADROOM + opTransitionLatency + DECT_HEADROOM;
+    dlSchedule = base + DECT_SLOT_DURATION_TICK + DECT_HEADROOM + opTransitionLatency + DECT_HALF_HEADROOM;
     ulSchedule = base + DECT_SLOT_DURATION_TICK + DECT_HEADROOM + opTransitionLatency + DECT_SLOT_DURATION_TICK + DECT_HEADROOM + opTransitionLatency; 
 
     genericRxDuration = DECT_SLOT_DURATION_TICK + DECT_HEADROOM;
 
-    LOG_WRN("genericTxScheduleOffset: %llu\ndlSchedule: %llu\ngenericRxDuration: %llu\nheadroom: %llu\nblock: %llu\n", genericTxScheduleOffset, dlSchedule, genericRxDuration, DECT_HEADROOM, blockTicks);
+    LOG_WRN("dlSchedule: %llu\ngenericRxDuration: %llu\nheadroom: %llu\nblock: %llu\n", dlSchedule, genericRxDuration, DECT_HEADROOM, blockTicks);
 
     err = DectPhy_TransmitBeacon(base);
     err |= DectPhy_TransmitHeadOfQueue(FT_TX_HANDLE + slotCounter, dlSchedule);
