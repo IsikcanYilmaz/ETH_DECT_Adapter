@@ -469,6 +469,7 @@ int DectPhy_HandleIncomingPacketFragment(char *data, size_t len)
     currentRxDatagramSize = (isFragmented) ? fragHeader->datagramSize : sduSize;
     currentRxDatagramOffset = 0;
     currentRxDatagram = (struct LeanWiznet_Packet *) k_malloc(sizeof(struct LeanWiznet_Packet) + currentRxDatagramSize);
+    memset(currentRxDatagram, 0x00, sizeof(struct LeanWiznet_Packet) + currentRxDatagramSize);
     if (currentRxDatagram == NULL)
     {
       LOG_ERR("%s:%d OOM", __FUNCTION__, __LINE__);
@@ -491,14 +492,18 @@ int DectPhy_HandleIncomingPacketFragment(char *data, size_t len)
     sduSize -= sizeof(DectFragmentationHeader_t);
     LOG_DBG("FRAGMENT: OFFSET %d, SIZE %d, FRAGMENT PL SIZE %d", fragHeader->datagramOffset, fragHeader->datagramSize, sduSize);
 
-    if (fragHeader->datagramOffset + sduSize < currentRxDatagramSize)
+    // Sanity check: if the size of the data portion of the current fragment packet 
+    if (fragHeader->datagramOffset + sduSize <= currentRxDatagramSize) 
     {
       memcpy((char *) (currentRxDatagram->payload) + fragHeader->datagramOffset, sduPayload, sduSize);
     }
     else
     {
       LOG_ERR("%s:%d bad datagram offset! %d", __FUNCTION__, __LINE__, fragHeader->datagramOffset);
-      LOG_HEXDUMP_ERR(data, len, "ERR"); 
+      LOG_ERR("Datagram offset %d, sdu size %d, currentRxDatagramSize %d", fragHeader->datagramOffset, sduSize, currentRxDatagramSize);
+      LOG_HEXDUMP_ERR(data, len, "RAW"); 
+      LOG_HEXDUMP_ERR(currentRxDatagram, sduPayload, "TO BE SENT TO W5500");
+      LOG_ERR("---");
       k_free(currentRxDatagram);
       currentRxDatagram = NULL;
       return 1;

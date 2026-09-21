@@ -24,7 +24,7 @@
 #define DECT_GAP_US (5) // ?
 #define DECT_GAP_TICK ((uint64_t) (DECT_GAP_US * NRF_MODEM_DECT_MODEM_TIME_TICK_RATE_KHZ) / 1000)
 
-#define DECT_HEADROOM (US_TO_MODEM_TICKS(500)) // 300 us
+#define DECT_HEADROOM (US_TO_MODEM_TICKS(300)) // 300 us
 #define DECT_HALF_HEADROOM (DECT_HEADROOM/2) 
 #define DECT_QUART_HEADROOM (DECT_HEADROOM/4)
 
@@ -48,7 +48,7 @@
 typedef struct DectPacket_s
 {
   uint8_t flags;
-  uint8_t payloadSize; // This includes every header + payload data
+  uint8_t payloadSize; // This includes every header + payload data EXCEPT this header. so the size of the payload char array below
   char payload[];
 } __attribute__((packed)) DectPacket_t;
 
