@@ -115,7 +115,6 @@ static void mock_time_get(const struct nrf_modem_dect_phy_time_get_event *evt)
   if (!warmedUp)
   {
     int err;
-    blockTicks = DECT_SLOT_DURATION_TICK + DECT_HEADROOM;
 
     base = modem_time + 1000 * DECT_SLOT_DURATION_TICK;
 
@@ -126,7 +125,7 @@ static void mock_time_get(const struct nrf_modem_dect_phy_time_get_event *evt)
 
     genericRxDuration = DECT_SLOT_DURATION_TICK + DECT_HEADROOM;
 
-    LOG_WRN("dlSchedule: %llu\ngenericRxDuration: %llu\nheadroom: %llu\nblock: %llu\n", dlSchedule, genericRxDuration, DECT_HEADROOM, blockTicks);
+    LOG_WRN("dlSchedule: %llu\ngenericRxDuration: %llu\nheadroom: %llu", dlSchedule, genericRxDuration, DECT_HEADROOM);
 
     err = DectPhy_TransmitBeacon(base);
     err |= DectPhy_TransmitHeadOfQueue(FT_TX_HANDLE + slotCounter, dlSchedule);

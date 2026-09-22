@@ -16,11 +16,6 @@
 #define DECT_FRAME_DURATION_US (10000)
 #define DECT_SLOTS_PER_FRAME (24)
 #define DECT_SLOT_DURATION_US (417) // 416.67
-// #define DECT_SLOT_DURATION_TICK DECT_RADIO_SUBSLOT_DURATION_IN_MODEM_TICKS //((uint64_t)((DECT_SLOT_DURATION_US * NRF_MODEM_DECT_MODEM_TIME_TICK_RATE_KHZ) / 1000))
-//
-
-// #define DECT_HALF_SLOT_DURATION_TICK ((uint64_t)((DECT_SLOT_DURATION_US * NRF_MODEM_DECT_MODEM_TIME_TICK_RATE_KHZ / 2 ) / 1000))
-// #define DECT_SLOT_DURATION_TICK ((uint64_t)((DECT_SLOT_DURATION_US * NRF_MODEM_DECT_MODEM_TIME_TICK_RATE_KHZ) / 1000))
 
 #define DECT_SLOT_DURATION_TICK (28800)
 #define DECT_HALF_SLOT_DURATION_TICK (14400)
@@ -30,7 +25,7 @@
 #define DECT_QUART_HEADROOM (DECT_HEADROOM/4)
 
 // #define DECT_OPS_PER_BEACON 8 //164
-#define DECT_OPS_PER_BEACON 200 //164 // working
+#define DECT_OPS_PER_BEACON (DECT_SLOTS_PER_FRAME * 10) //164 // working
 
 // #define DECT_MASTER_BEACON_PERIOD_TICK (10 * 24 * DECT_SLOT_DURATION_TICK) //(30 * 24 * DECT_SLOT_DURATION_TICK)
 #define DECT_MASTER_BEACON_PERIOD_TICK (20 * 24 * DECT_SLOT_DURATION_TICK) // working
@@ -191,6 +186,7 @@ extern const struct gpio_dt_spec *ptUlSwitch;
 extern struct k_sem operation_sem;
 extern struct k_sem time_sem;
 extern struct k_sem done_sem; 
+extern struct k_sem resync_sem;
 
 extern sys_slist_t ops_list;
 
@@ -212,6 +208,7 @@ bool DectPhy_PktIsBeacon(char *pkt);
 bool DectPhy_PktIsNone(char *pkt);
 void DectPhy_EnqueueEthTx(void *pkt);
 void DectPhy_InFlightCompleted(void);
+int DectPhy_CancelAllPendingOps(void);
 
 #endif
 

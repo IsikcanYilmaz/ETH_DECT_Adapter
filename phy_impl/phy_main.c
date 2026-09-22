@@ -2,7 +2,6 @@
 #include <string.h>
 #include <stdbool.h>
 #include <nrf_modem_dect_phy.h>
-#include <nrf_modem_dect_clock_sync.h>
 #include <modem/nrf_modem_lib.h>
 #include <zephyr/logging/log.h>
 #include <zephyr/drivers/hwinfo.h>
@@ -161,6 +160,7 @@ K_SEM_DEFINE(rx_done_sem, 0, 1);
 K_SEM_DEFINE(tx_done_sem, 0, 1);
 K_SEM_DEFINE(time_sem, 0, 1);
 K_SEM_DEFINE(done_sem, 0, 1);
+K_SEM_DEFINE(resync_sem, 0, 1);
 
 bool DectPhy_PktIsBeacon(char *pkt)
 {
@@ -538,6 +538,11 @@ int DectPhy_HandleIncomingPacketFragment(char *data, size_t len)
   return err;
 }
 
+int DectPhy_CancelAllPendingOps(void)
+{
+  return nrf_modem_dect_phy_cancel(NRF_MODEM_DECT_PHY_HANDLE_CANCEL_ALL);
+}
+
 /* Callback after init operation. */
 static void on_init(const struct nrf_modem_dect_phy_init_event *evt)
 {
@@ -583,7 +588,7 @@ static void on_capability_get(const struct nrf_modem_dect_phy_capability_get_eve
             current mcs:         %d\n\
             mu:                  %d\n\
             beta:                %d\n\
-            bytes per tx:        %d\n", 
+            bytes per slot:      %d\n", 
             capa->variant[0].rx_spatial_streams, capa->variant[0].mcs_max, knobs.mcs, capa->variant[0].mu, capa->variant[0].mcs_max, mcsToBytesPerSlot[knobs.mcs]);
 
     mcs_max = capa->variant[0].mcs_max;
@@ -620,7 +625,7 @@ static void on_latency_info_get(const struct nrf_modem_dect_phy_latency_info_eve
     rx_activeToIdleLatency = latencyInfo.operation.receive.active_to_idle_rx;
     LOG_WRN("Latency info: \n\
             slot_ticks:              %llu\n\
-            headroom_ticks:               %llu\n\
+            headroom_ticks:          %llu\n\
             scheduled_op_transition: %d\n\
             op_startup:              %d\n\
             tx_idleToActiveLatency:  %d\n\
@@ -631,8 +636,8 @@ static void on_latency_info_get(const struct nrf_modem_dect_phy_latency_info_eve
             current uptime ticks:    %llu\n\
             modem ticks per ms:      %llu\n\
             host ticks per ms:       %llu\n", 
-            DECT_SLOT_DURATION_TICK, 
-            DECT_HEADROOM, 
+            (uint64_t) DECT_SLOT_DURATION_TICK, 
+            (uint64_t) DECT_HEADROOM, 
             opTransitionLatency, opStartupLatency, tx_idleToActiveLatency, tx_activeToIdleLatency, rx_idleToActiveLatency, rx_activeToIdleLatency,
             modem_time, k_uptime_ticks(), (uint64_t)(NRF_MODEM_DECT_MODEM_TIME_TICK_RATE_KHZ), (uint64_t) (CONFIG_SYS_CLOCK_TICKS_PER_SEC / 1000));
   }

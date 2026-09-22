@@ -14,12 +14,11 @@ static void on_time_get_pt(const struct nrf_modem_dect_phy_time_get_event *evt)
 {
   int err;
 	LOG_DBG("time_get cb time %"PRIu64" status %x", modem_time, evt->err);
-  blockTicks = DECT_SLOT_DURATION_TICK + opTransitionLatency + DECT_HEADROOM;
 
   genericRelativeRxSchedule = opTransitionLatency;
   genericRxDuration = DECT_SLOT_DURATION_TICK + DECT_HEADROOM;
 
-  LOG_WRN("genericRxDuration: %llu\nheadroom: %llu\nblock: %llu", genericRxDuration, DECT_HEADROOM, blockTicks);
+  LOG_WRN("genericRxDuration: %llu\nheadroom: %llu", genericRxDuration, DECT_HEADROOM);
 
   warmedUp = true;
   k_sem_give(&time_sem);
@@ -34,8 +33,6 @@ static void mock_pcc(const struct nrf_modem_dect_phy_pcc_event *evt)
   }
 }
 
-static char firstbuf[8] = {'f', 'i', 'r', 's', 't', 0x00, 0x00, 0x00};
-static char secondbuf[8] = {'s', 'e', 'c', 'o', 'n', 'd', 0x00, 0x00};
 static void mock_pdc(const struct nrf_modem_dect_phy_pdc_event *evt) // TODO make this part as lean as possible. just copy over the bytes and let a thread do processing
 {
   int err;
@@ -55,7 +52,6 @@ static void mock_pdc(const struct nrf_modem_dect_phy_pdc_event *evt) // TODO mak
       uint32_t next_beacon_offset = beac->modem_ticks_until_next_beacon;
       uint64_t next_beacon_tick = modem_time + next_beacon_offset;
       next_beacon_tick -= (DECT_SLOT_DURATION_TICK + DECT_HEADROOM); // JON TODO MAGIC NUMBER!!!! FIGURE OUT WHY THIS WORKED AND REMOVE ITTTTTTTT
-      // next_beacon_tick -= (DECT_HALF_SLOT_DURATION_TICK); // JON TODO MAGIC NUMBER!!!! FIGURE OUT WHY THIS WORKED AND REMOVE ITTTTTTTT
       numSlotsInFrame = beac->ops_per_beacon;
       slotCounter = numSlotsInFrame;
 
@@ -63,7 +59,6 @@ static void mock_pdc(const struct nrf_modem_dect_phy_pdc_event *evt) // TODO mak
       uint64_t dlRxStart = next_beacon_tick + DECT_SLOT_DURATION_TICK + DECT_HEADROOM + opTransitionLatency;
       uint64_t ulTxStart = dlRxStart + DECT_SLOT_DURATION_TICK + DECT_HEADROOM + opTransitionLatency + (DECT_HALF_HEADROOM);
 
-      firstbuf[5] = slotCounter;
       err = DectPhy_Receive(BEACON_LATCH_RX_HANDLE, dlRxDuration, next_beacon_tick); // SUCCESSFULLY RECEIVES
       err = DectPhy_Receive(PT_RX_HANDLE + slotCounter, dlRxDuration, dlRxStart); // SUCCESSFULLY RECEIVES 
       err = DectPhy_TransmitHeadOfQueue(PT_TX_HANDLE + slotCounter, ulTxStart); // SUCCESSFULLY TRANSMITS
@@ -218,8 +213,11 @@ static void mock_complete(const struct nrf_modem_dect_phy_op_complete_event *evt
   if (ptState == PT_STATE_SCHEDULED_DOWNLINK && IS_RX_HANDLE(evt->handle))
   {
     gpio_pin_toggle_dt(ptDlSwitch);
-    LOG_ERR("%d DOWNLINK SLOT COULDNT RECEIVE DATA", evt->handle);
-    sys_reboot(SYS_REBOOT_COLD); // TODO REAALLY Bad... but for now lets just reboot if we go out of sync 
+    LOG_ERR("%d DOWNLINK SLOT COULDNT RECEIVE DATA. DESYNCHRONIZED", evt->handle);
+    k_sem_give(&resync_sem);
+    ptState = PT_STATE_WAIT_FOR_BEACON;
+    // DectPhy_Receive(BEACON_RX_HANDLE, US_TO_MODEM_TICKS(1000000000), 0); 
+    // sys_reboot(SYS_REBOOT_COLD); // TODO REAALLY Bad... but for now lets just reboot if we go out of sync 
     // TODO handle the cases where we either miss a beacon or we miss a DL RX
   }
 
@@ -292,13 +290,17 @@ void Pt_InfiniteLoop(void)
     err = DectPhy_Receive(BEACON_RX_HANDLE, US_TO_MODEM_TICKS(1000000000), 0); // GET FAKE BEACON
     // DectPhy_ReceiveContinuous(PT_RX_HANDLE, US_TO_MODEM_TICKS(100000000), 0); // Get first beacon
 
-    k_sem_take(&done_sem, K_FOREVER); // spin here forever unless an error happens // todo bad design
+    k_sem_take(&resync_sem, K_FOREVER); // spin here forever unless an error happens // todo bad design
     
     LOG_ERR("DONE");
-    while(true) // goodnight sweet prince
-    {
-      k_sleep(K_MSEC(1000));
-    }
+    warmedUp = false;
+    DectPhy_CancelAllPendingOps();
+
+    nrf_modem_dect_phy_time_get();  // TODO maybe tie this to phy_main.c too for parity sake
+    // while(true) // goodnight sweet prince
+    // {
+    //   k_sleep(K_MSEC(1000));
+    // }
   }
 }
 
