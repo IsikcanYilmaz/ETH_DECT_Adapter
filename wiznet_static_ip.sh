@@ -4,7 +4,7 @@ IP1="111.222.111.2"
 IP2="111.222.111.3"
 
 IP1="10.42.0.1"
-IP2="10.42.0.2"
+IP2="10.42.0.50"
 ROVER_IP="10.42.0.50"
 
 GATEWAY="111.222.111.1"
@@ -25,13 +25,16 @@ ROVER_MAC="d8:3a:dd:9a:05:d7"
 FLEET_MANAGER_MAC="f0:b2:b9:11:ca:fa"
 
 if [ "$(hostname)" == "jon-ThinkPad-T14-Gen-4" ]; then
-  echo "[+] I am THINKPAD"
+  echo "[+] I am THINKPAD. Connecting to OFFICE"
   LOCAL_IP="$IP2"
   REMOTE_IP="$IP1"
   IFACENAME="enp1s0f0"
   LOCAL_MAC="$THINKPAD_MAC"
   REMOTE_MAC="$OFFICE_MAC"
   # REMOTE_MAC="$TOBIAS_MAC"
+  # TESTING AGV. 
+  # REMOTE_IP="10.42.0.50"
+  # REMOTE_MAC="$ROVER_MAC"
 elif [ "$(hostname)" == "agv" ]; then
   echo "[+] I am ROVER"
   LOCAL_IP="$ROVER_IP"
