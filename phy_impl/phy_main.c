@@ -304,22 +304,30 @@ int DectPhy_TransmitHeadOfQueue(uint32_t handle, uint64_t start_time)
   // struct DectInFlightPktStub_s *inFlight = k_malloc(sizeof(struct DectInFlightPktStub_s));
   
   // If we have an outgoing datagram loaded up, keep sending it. 
+  size_t effectivePayloadSize;
   size_t txSizePerMcs = mcsToBytesPerSlot[knobs.mcs];
   DectPacket_t *fragmentPkt = k_malloc(txSizePerMcs); 
   if (fragmentPkt == NULL)
   {
-    LOG_ERR("%s:%d OOM", __FUNCTION__, __LINE__);
-    return 1;
+    LOG_ERR("%s:%d OOM cannot allocate memory for pkt frag. Dropping datagram shooting blank", __FUNCTION__, __LINE__);
+    if (currentTxPacket)
+    {
+      k_free(currentTxPacket);
+      currentTxPacket = NULL;
+      currentTxDatagramOffset = 0;
+    }
+    if (!k_queue_is_empty(&ethRxQueue))
+    {
+      struct LeanWiznet_Packet *dispose = k_queue_get(&ethRxQueue, K_NO_WAIT);
+      k_free(dispose);
+    }
+    return DectPhy_Transmit(handle, "NONE", 4, start_time); // TODO Change this to use the actual PDU 
+    // return 1;
   }
   // JON Interesting point here: apparently in 802.15.4 each frame carries data from exactly one datagram. 
   // Question is do we have to do it that way? Assume one slot we pack with the remaining bytes of a datagram, 2 bytes
   // the rest of the slot is going to be empty. Do we want this? Could it even be a paper? lol
   //
-  // TODO JON no pack as many SDUs as you can here. But lets get one by one working
-
-  // memset(fragmentPkt, 0x00, txSizePerMcs); // TODO remove this not needed
-  size_t effectivePayloadSize;
-
   // TODO JON Pack fragmentPkt with as many SDUs in a loop
 
   // If nothing is loaded in our currentTxPacket slot, first check if we even have a packet in the queue, if so load it
@@ -484,7 +492,6 @@ int DectPhy_HandleIncomingPacketFragment(char *data, size_t len)
     currentRxDatagramSize = (isFragmented) ? fragHeader->datagramSize : sduSize;
     currentRxDatagramOffset = 0;
     currentRxDatagram = (struct LeanWiznet_Packet *) k_malloc(sizeof(struct LeanWiznet_Packet) + currentRxDatagramSize);
-    memset(currentRxDatagram, 0x00, sizeof(struct LeanWiznet_Packet) + currentRxDatagramSize);
     if (currentRxDatagram == NULL)
     {
       LOG_ERR("%s:%d OOM", __FUNCTION__, __LINE__);
@@ -517,7 +524,7 @@ int DectPhy_HandleIncomingPacketFragment(char *data, size_t len)
       LOG_ERR("%s:%d bad datagram offset! %d", __FUNCTION__, __LINE__, fragHeader->datagramOffset);
       LOG_ERR("Datagram offset %d, sdu size %d, currentRxDatagramSize %d", fragHeader->datagramOffset, sduSize, currentRxDatagramSize);
       LOG_HEXDUMP_ERR(data, len, "RAW"); 
-      LOG_HEXDUMP_ERR(currentRxDatagram, sduPayload, "TO BE SENT TO W5500");
+      LOG_HEXDUMP_ERR(currentRxDatagram, sduSize, "TO BE SENT TO W5500");
       LOG_ERR("---");
       k_free(currentRxDatagram);
       currentRxDatagram = NULL;

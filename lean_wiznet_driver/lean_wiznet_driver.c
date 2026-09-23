@@ -268,6 +268,12 @@ static struct LeanWiznet_Packet* w5500_rx(struct LeanWiznet_config *cfg, struct 
 
 	w5500_readbuf(cfg, off, header, 2); // From read pointer read 2 bytes
 	rx_len = sys_get_be16(header) - 2;
+  if (rx_len > LEAN_WIZNET_MAX_POSSIBLE_DATAGRAM_BYTES)
+  {
+    LOG_ERR("Something wrong with eth packet received from w5500. header says rx_len %d. dropping", rx_len);
+    k_mutex_unlock(&ctx->spi_mutex);
+    return NULL;
+  }
   
 	read_len = rx_len;
 	reader = off + 2;

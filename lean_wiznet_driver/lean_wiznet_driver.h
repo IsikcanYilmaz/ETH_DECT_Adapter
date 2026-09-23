@@ -102,6 +102,7 @@ struct LeanWiznet_config {
 #define LEAN_WIZNET_MONITOR_PERIOD_MS 500
 #define LEAN_WIZNET_SPI_MUTEX_TIMEOUT_MS 10000
 
+#define LEAN_WIZNET_MAX_POSSIBLE_DATAGRAM_BYTES (1600)
 
 struct LeanWiznet_runtime {
 	// struct net_if *iface;

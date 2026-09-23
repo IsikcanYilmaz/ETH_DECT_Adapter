@@ -62,6 +62,13 @@ static void mock_pdc(const struct nrf_modem_dect_phy_pdc_event *evt) // TODO mak
       err = DectPhy_Receive(BEACON_LATCH_RX_HANDLE, dlRxDuration, next_beacon_tick); // SUCCESSFULLY RECEIVES
       err = DectPhy_Receive(PT_RX_HANDLE + slotCounter, dlRxDuration, dlRxStart); // SUCCESSFULLY RECEIVES 
       err = DectPhy_TransmitHeadOfQueue(PT_TX_HANDLE + slotCounter, ulTxStart); // SUCCESSFULLY TRANSMITS
+      
+      if (err)
+      {
+        LOG_ERR("%s:%d Error while scheduling next ops");
+        k_sem_give(&resync_sem);
+        return err;
+      }
 
       LOG_WRN("@ %llu FIRST BEACON RECEIVED. %d BYTES. %d OPS PER BEACON", modem_time, evt->len, slotCounter);
       LOG_WRN("EXPECTING LATCH BECAON IN %d TICKS, @ %llu", next_beacon_offset, modem_time + next_beacon_offset);
@@ -76,7 +83,7 @@ static void mock_pdc(const struct nrf_modem_dect_phy_pdc_event *evt) // TODO mak
     }
     else
     {
-      err = DectPhy_Receive(BEACON_RX_HANDLE, US_TO_MODEM_TICKS(1000000000), 0); // Unexpected non beacon
+      err = DectPhy_Receive(BEACON_RX_HANDLE, 0xffffffff, 0); // Unexpected non beacon
       LOG_DBG("NON BEACON", err); 
     }
   }
@@ -98,7 +105,7 @@ static void mock_pdc(const struct nrf_modem_dect_phy_pdc_event *evt) // TODO mak
     else 
     {
       // TODO Should also cancel all modem ops here
-      err = DectPhy_Receive(BEACON_RX_HANDLE, US_TO_MODEM_TICKS(1000000000), 0); // Unexpected non beacon // TODO maybe just do this in the op_complete part
+      err = DectPhy_Receive(BEACON_RX_HANDLE, 0xffffffff, 0); // Unexpected non beacon // TODO maybe just do this in the op_complete part
       ptState = PT_STATE_WAIT_FOR_BEACON;
       LOG_ERR("LATCH BEACON MISSED. GOING BACK TO PT_STATE_WAIT_FOR_BEACON");
     }
@@ -125,6 +132,13 @@ static void mock_pdc(const struct nrf_modem_dect_phy_pdc_event *evt) // TODO mak
       err = DectPhy_Receive(PT_RX_HANDLE + slotCounter, dlRxDuration, nextRx);
       err = DectPhy_TransmitHeadOfQueue(PT_TX_HANDLE + slotCounter, nextTx);
 
+      if (err)
+      {
+        LOG_ERR("%s:%d Error while scheduling next ops");
+        k_sem_give(&resync_sem);
+        return err;
+      }
+
       LOG_DBG("@ %llu Scheduled rx to %llu and tx to %llu. slot %d. PCC-PDC DIFF %llu", modem_time, nextRx, nextTx, slotCounter, lastPdcModemTick - lastPccModemTick);
 
       ptState = PT_STATE_SCHEDULED_UPLINK; 
@@ -149,6 +163,13 @@ static void mock_pdc(const struct nrf_modem_dect_phy_pdc_event *evt) // TODO mak
       err = DectPhy_TransmitHeadOfQueue(PT_TX_HANDLE + slotCounter, nextTx);
 
       LOG_DBG("EXPECTING LATCH @ %llu DL @ %llu UL @ %llu", next_beacon_tick, nextRx, nextTx);
+
+      if (err)
+      {
+        LOG_ERR("%s:%d Error while scheduling next ops");
+        k_sem_give(&resync_sem);
+        return err;
+      }
       
       ptState = PT_STATE_SCHEDULED_UPLINK; 
     }
@@ -183,13 +204,16 @@ static void mock_complete(const struct nrf_modem_dect_phy_op_complete_event *evt
   // {
   //   gpio_pin_toggle_dt(beaconRxSwitch);
   // }
+  if (evt->handle == BEACON_RX_HANDLE && ptState == PT_STATE_WAIT_FOR_BEACON)
+  {
+    LOG_ERR("WAIT FOR BEACON TIMED OUT");
+  }
 
   if (evt->handle == BEACON_LATCH_RX_HANDLE && ptState == PT_STATE_WAIT_FOR_LATCH_BEACON) // WE MISSED THE LATCH BEACON! //////////////
   {
     err = DectPhy_Receive(BEACON_RX_HANDLE, US_TO_MODEM_TICKS(1000000000), 0); // GET BEACON 
     LOG_ERR("PT_STATE_WAIT_FOR_LATCH_BEACON TIMED OUT!");
     k_sem_give(&resync_sem);
-    ptState = PT_STATE_WAIT_FOR_BEACON;
   }
 
   if (ptState == PT_STATE_SCHEDULED_UPLINK && IS_TX_HANDLE(evt->handle)) // ULTx DONE. EITHER KEEP GOING, OR THIS IS THE END OF A FRAME
@@ -214,10 +238,6 @@ static void mock_complete(const struct nrf_modem_dect_phy_op_complete_event *evt
     gpio_pin_toggle_dt(ptDlSwitch);
     LOG_ERR("%d DOWNLINK SLOT COULDNT RECEIVE DATA", evt->handle);
     k_sem_give(&resync_sem);
-    ptState = PT_STATE_WAIT_FOR_BEACON;
-    // DectPhy_Receive(BEACON_RX_HANDLE, US_TO_MODEM_TICKS(1000000000), 0); 
-    // sys_reboot(SYS_REBOOT_COLD); // TODO REAALLY Bad... but for now lets just reboot if we go out of sync 
-    // TODO handle the cases where we either miss a beacon or we miss a DL RX
   }
 
   if (ptState == PT_STATE_TEST) // TODO remove
@@ -286,7 +306,7 @@ void Pt_InfiniteLoop(void)
 
     LOG_ERR("PT LOOP BEGIN");
 
-    err = DectPhy_Receive(BEACON_RX_HANDLE, US_TO_MODEM_TICKS(1000000000), 0); // GET FAKE BEACON
+    err = DectPhy_Receive(BEACON_RX_HANDLE, 0xffffffff, 0); // GET FAKE BEACON
     // DectPhy_ReceiveContinuous(PT_RX_HANDLE, US_TO_MODEM_TICKS(100000000), 0); // Get first beacon
 
     k_sem_take(&resync_sem, K_FOREVER); // spin here forever unless an error happens // todo bad design
@@ -295,6 +315,7 @@ void Pt_InfiniteLoop(void)
     // k_sleep(K_MSEC(1000));
     DectPhy_CancelAllPendingOps();
     k_sem_take(&cancel_sem, K_FOREVER);
+  
     warmedUp = false;
     nrf_modem_dect_phy_time_get();  // TODO maybe tie this to phy_main.c too for parity sake
     k_sleep(K_MSEC(100));
