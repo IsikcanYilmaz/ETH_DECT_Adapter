@@ -132,6 +132,7 @@ static void mock_time_get(const struct nrf_modem_dect_phy_time_get_event *evt)
     err |= DectPhy_Receive(FT_RX_HANDLE + slotCounter, genericRxDuration, ulSchedule);
     
     warmedUp = true;
+    LOG_ERR("FT LOOP BEGIN");
     k_sem_give(&time_sem);
   }
 }

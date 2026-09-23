@@ -824,7 +824,7 @@ bool DectPhy_WiznetAlert(void) // TODO better way of doing this
 static int cmd_bridge(const struct shell *shell, size_t argc, char **argv)
 {
   // If ran without args it will print the status
-  if (argc == 0)
+  if (argc == 1)
   {
     shell_print(shell, "Dect Bridge status:");
     shell_print(shell, "I am : %s", (iAmFt) ? "FT" : "PT");
