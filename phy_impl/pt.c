@@ -63,8 +63,8 @@ static void mock_pdc(const struct nrf_modem_dect_phy_pdc_event *evt) // TODO mak
       err = DectPhy_Receive(PT_RX_HANDLE + slotCounter, dlRxDuration, dlRxStart); // SUCCESSFULLY RECEIVES 
       err = DectPhy_TransmitHeadOfQueue(PT_TX_HANDLE + slotCounter, ulTxStart); // SUCCESSFULLY TRANSMITS
 
-      LOG_DBG("@ %llu FIRST BEACON RECEIVED. %d BYTES. %d OPS PER BEACON", modem_time, evt->len, slotCounter);
-      LOG_DBG("EXPECTING LATCH BECAON IN %d TICKS, @ %llu", next_beacon_offset, modem_time + next_beacon_offset);
+      LOG_WRN("@ %llu FIRST BEACON RECEIVED. %d BYTES. %d OPS PER BEACON", modem_time, evt->len, slotCounter);
+      LOG_WRN("EXPECTING LATCH BECAON IN %d TICKS, @ %llu", next_beacon_offset, modem_time + next_beacon_offset);
       LOG_HEXDUMP_DBG(evt->data, 16, "FIRST BEACON");
       LOG_DBG("NOW %llu LATCH SCH %llu DL SCH %llu UL SCH %llu", modem_time, next_beacon_tick, next_beacon_tick + DECT_SLOT_DURATION_TICK + opTransitionLatency + DECT_HEADROOM, next_beacon_tick + 2 * (DECT_SLOT_DURATION_TICK + opTransitionLatency + DECT_HEADROOM));
 
@@ -187,10 +187,9 @@ static void mock_complete(const struct nrf_modem_dect_phy_op_complete_event *evt
   if (evt->handle == BEACON_LATCH_RX_HANDLE && ptState == PT_STATE_WAIT_FOR_LATCH_BEACON) // WE MISSED THE LATCH BEACON! //////////////
   {
     err = DectPhy_Receive(BEACON_RX_HANDLE, US_TO_MODEM_TICKS(1000000000), 0); // GET BEACON 
-    LOG_ERR("PT_STATE_WAIT_FOR_LATCH_BEACON TIMED OUT! FALLING BACK TO WAIT_FOR_BEACON");
-    ptState = PT_STATE_WAIT_FOR_BEACON; 
-    gpio_pin_toggle_dt(beaconRxSwitch);
-    // k_sem_give(&done_sem);
+    LOG_ERR("PT_STATE_WAIT_FOR_LATCH_BEACON TIMED OUT!");
+    k_sem_give(&resync_sem);
+    ptState = PT_STATE_WAIT_FOR_BEACON;
   }
 
   if (ptState == PT_STATE_SCHEDULED_UPLINK && IS_TX_HANDLE(evt->handle)) // ULTx DONE. EITHER KEEP GOING, OR THIS IS THE END OF A FRAME
@@ -213,7 +212,7 @@ static void mock_complete(const struct nrf_modem_dect_phy_op_complete_event *evt
   if (ptState == PT_STATE_SCHEDULED_DOWNLINK && IS_RX_HANDLE(evt->handle))
   {
     gpio_pin_toggle_dt(ptDlSwitch);
-    LOG_ERR("%d DOWNLINK SLOT COULDNT RECEIVE DATA. DESYNCHRONIZED", evt->handle);
+    LOG_ERR("%d DOWNLINK SLOT COULDNT RECEIVE DATA", evt->handle);
     k_sem_give(&resync_sem);
     ptState = PT_STATE_WAIT_FOR_BEACON;
     // DectPhy_Receive(BEACON_RX_HANDLE, US_TO_MODEM_TICKS(1000000000), 0); 
@@ -292,11 +291,15 @@ void Pt_InfiniteLoop(void)
 
     k_sem_take(&resync_sem, K_FOREVER); // spin here forever unless an error happens // todo bad design
     
-    LOG_ERR("DONE");
-    warmedUp = false;
+    LOG_ERR("DESYNCHRONIZED");
+    // k_sleep(K_MSEC(1000));
     DectPhy_CancelAllPendingOps();
-
+    k_sem_take(&cancel_sem, K_FOREVER);
+    warmedUp = false;
     nrf_modem_dect_phy_time_get();  // TODO maybe tie this to phy_main.c too for parity sake
+    k_sleep(K_MSEC(100));
+    // DectPhy_CancelAllPendingOps();
+
     // while(true) // goodnight sweet prince
     // {
     //   k_sleep(K_MSEC(1000));

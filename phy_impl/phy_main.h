@@ -25,7 +25,7 @@
 #define DECT_QUART_HEADROOM (DECT_HEADROOM/4)
 
 // #define DECT_OPS_PER_BEACON 8 //164
-#define DECT_OPS_PER_BEACON (DECT_SLOTS_PER_FRAME * 10) //164 // working
+#define DECT_OPS_PER_BEACON (DECT_SLOTS_PER_FRAME * 5) //164 // working
 
 // #define DECT_MASTER_BEACON_PERIOD_TICK (10 * 24 * DECT_SLOT_DURATION_TICK) //(30 * 24 * DECT_SLOT_DURATION_TICK)
 #define DECT_MASTER_BEACON_PERIOD_TICK (20 * 24 * DECT_SLOT_DURATION_TICK) // working
@@ -71,6 +71,7 @@ typedef struct DectKnobs_s
 {
   uint32_t mcs;
   uint16_t ops_per_beacon;
+  uint16_t carrier;
 } DectKnobs_t;
 
 enum DectPtState_e
@@ -187,6 +188,7 @@ extern struct k_sem operation_sem;
 extern struct k_sem time_sem;
 extern struct k_sem done_sem; 
 extern struct k_sem resync_sem;
+extern struct k_sem cancel_sem;
 
 extern sys_slist_t ops_list;
 

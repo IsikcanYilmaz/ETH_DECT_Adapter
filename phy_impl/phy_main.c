@@ -82,6 +82,7 @@ uint16_t currentRxDatagramSize = 0;
 DectKnobs_t knobs = {
   .mcs = CONFIG_APP_MCS,
   .ops_per_beacon = DECT_OPS_PER_BEACON,
+  .carrier = CONFIG_CARRIER,
 };
 
 // MCS to NUM BYTES PER SLOT. Indexed by MCS
@@ -149,7 +150,7 @@ struct phy_ctrl_field_common {
 
 /* Dect PHY config parameters. */
 static struct nrf_modem_dect_phy_config_params dect_phy_config_params = {
-	.band_group_index = ((CONFIG_CARRIER >= 525 && CONFIG_CARRIER <= 551)) ? 1 : 0,
+	.band_group_index = ((CONFIG_CARRIER >= 525 && CONFIG_CARRIER <= 551)) ? 1 : 0, // TODO if we ever use a carrier between 525 and 551 this bit needs to be 1. seems like we wont
 	.harq_rx_process_count = 4, // JON can i lower this since i dont use harq
 	.harq_rx_expiry_time_us = 5000000,
 };
@@ -189,7 +190,7 @@ int DectPhy_ReceiveContinuous(uint32_t handle, uint32_t durationTicks, uint64_t 
 		.rssi_interval = NRF_MODEM_DECT_PHY_RSSI_INTERVAL_OFF,
 		.link_id = NRF_MODEM_DECT_PHY_LINK_UNSPECIFIED,
 		.rssi_level = -60,
-		.carrier = CONFIG_CARRIER,
+		.carrier = knobs.carrier,
 		.duration = durationTicks,
 		.filter.short_network_id = CONFIG_APP_NETWORK_ID & 0xff,
 		.filter.is_short_network_id_used = 1,
@@ -218,7 +219,7 @@ int DectPhy_Receive(uint32_t handle, uint32_t durationTicks, uint64_t start_time
 		.rssi_interval = NRF_MODEM_DECT_PHY_RSSI_INTERVAL_OFF,
 		.link_id = NRF_MODEM_DECT_PHY_LINK_UNSPECIFIED,
 		.rssi_level = -60,
-		.carrier = CONFIG_CARRIER,
+		.carrier = knobs.carrier,
 		.duration = durationTicks,
 		.filter.short_network_id = CONFIG_APP_NETWORK_ID & 0xff,
 		.filter.is_short_network_id_used = 1,
@@ -280,7 +281,7 @@ int DectPhy_Transmit(uint32_t handle, void *data, size_t data_len, uint64_t star
     .network_id = CONFIG_APP_NETWORK_ID,
     .phy_type = 0,
     .lbt_rssi_threshold_max = 0,
-    .carrier = CONFIG_CARRIER,
+    .carrier = knobs.carrier,
     .lbt_period = 0,
     .phy_header = (union nrf_modem_dect_phy_hdr *) &header,
     .data = data,
@@ -390,8 +391,24 @@ int DectPhy_TransmitBeacon(uint64_t start_time)
   int err; 
   // TODO more in depth logic
   master_beacon.this_beacon_time = start_time;
-  uint32_t expected_next_beacon_offset = (uint32_t) beaconDelta; // TODO bad solution but will do. basically we're just sending the delta in ticks, between this xmit and the previous one. it worked
-  master_beacon.modem_ticks_until_next_beacon = expected_next_beacon_offset;
+  uint32_t expected_next_beacon_offset = (beaconDelta) ? (uint32_t) beaconDelta : (uint32_t) ((2*knobs.ops_per_beacon) * (DECT_SLOT_DURATION_TICK + DECT_HEADROOM + opTransitionLatency)); // TODO bad solution but will do. basically we're just sending the delta in ticks, between this xmit and the previous one. it worked
+  master_beacon.modem_ticks_until_next_beacon = expected_next_beacon_offset; // TODO the very first beacon does not have a correct number of $modem_ticks_until_next_beacon. as a result the pt can only latch 2 beacon later. not a showstopper but we should fix this
+
+  // TODO TESTING
+  // static bool first = false;
+  // if (!first)
+  // {
+  //   if (master_beacon.modem_ticks_until_next_beacon == 0)
+  //   {
+  //     LOG_ERR("BEACON Tix until next is 0. Making assumptions... ops per beacon %d", knobs.ops_per_beacon);
+  //     LOG_ERR("Assuming %llu ticks", (uint32_t) ((2*knobs.ops_per_beacon + 1) * (DECT_SLOT_DURATION_TICK + DECT_HEADROOM + opTransitionLatency)));
+  //   }
+  //   else
+  //   {
+  //     LOG_ERR("FIRST tix until next %d, beacondelta %llu", master_beacon.modem_ticks_until_next_beacon, beaconDelta);
+  //     first = true;
+  //   }
+  // }
 
   // TODO make these generic, reuse
   struct phy_ctrl_field_common header = {
@@ -412,7 +429,7 @@ int DectPhy_TransmitBeacon(uint64_t start_time)
     .network_id = CONFIG_APP_NETWORK_ID,
     .phy_type = 0,
     .lbt_rssi_threshold_max = 0,
-    .carrier = CONFIG_CARRIER,
+    .carrier = knobs.carrier,
     .lbt_period = 0,// NRF_MODEM_DECT_LBT_PERIOD_MAX, // JON EXPERIMENTAL
     .phy_header = (union nrf_modem_dect_phy_hdr *) &header,
     .data = &master_beacon,
@@ -425,7 +442,6 @@ int DectPhy_TransmitBeacon(uint64_t start_time)
 	}
 
   return 0;
-  // return DectPhy_Transmit(BEACON_TX_HANDLE, &beac, sizeof(DectBeaconMessage_t), start_time);
 }
 
 // enqueue packets here to send them over the ethernet connection
@@ -646,6 +662,7 @@ static void on_latency_info_get(const struct nrf_modem_dect_phy_latency_info_eve
 
 static void on_cancel(const struct nrf_modem_dect_phy_cancel_event *evt)
 {
+  LOG_ERR("CANCEL EVENT %d", evt->err);
   k_sem_give(&cancel_sem);
 }
 
@@ -828,6 +845,8 @@ static int cmd_bridge(const struct shell *shell, size_t argc, char **argv)
   {
     shell_print(shell, "Dect Bridge status:");
     shell_print(shell, "I am : %s", (iAmFt) ? "FT" : "PT");
+    shell_print(shell, "State: %d", (iAmFt) ? ftState : ptState);
+    shell_print(shell, "Knobs: Mcs: %d, carrier: %d, ops: %d", knobs.mcs, knobs.carrier, knobs.ops_per_beacon);
     return 0;
   }
 
