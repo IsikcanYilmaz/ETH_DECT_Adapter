@@ -15,7 +15,8 @@
 
 LOG_MODULE_REGISTER(dect_phy, LOG_LEVEL_WRN);
 
-#define CONFIG_CARRIER (1677) // from overlay-eu.conf
+// #define CONFIG_CARRIER (1677) // from overlay-eu.conf
+#define CONFIG_CARRIER (1657) // from overlay-eu.conf
 
 extern struct k_queue ethTxQueue; // TODO JON There comes a point where we dont free these things
 extern struct k_queue ethRxQueue;
@@ -307,7 +308,8 @@ int DectPhy_TransmitHeadOfQueue(uint32_t handle, uint64_t start_time)
   size_t effectivePayloadSize;
   size_t txSizePerMcs = mcsToBytesPerSlot[knobs.mcs];
   DectPacket_t *fragmentPkt = k_malloc(txSizePerMcs); 
-  if (fragmentPkt == NULL)
+
+  if (fragmentPkt == NULL) // JON TODO Here if an OOM happens we shoot a blank and drop the whole datagram. there's gotta be a better solution but itll prolly come during a rewrite or something
   {
     LOG_ERR("%s:%d OOM cannot allocate memory for pkt frag. Dropping datagram shooting blank", __FUNCTION__, __LINE__);
     if (currentTxPacket)
@@ -621,17 +623,17 @@ static void on_capability_get(const struct nrf_modem_dect_phy_capability_get_eve
 
 static void on_pcc(const struct nrf_modem_dect_phy_pcc_event *evt)
 {
-	LOG_INF("PCC Received header from device ID %d", evt->hdr.hdr_type_1.transmitter_id_hi << 8 | evt->hdr.hdr_type_1.transmitter_id_lo);
+	LOG_DBG("PCC Received header from device ID %d", evt->hdr.hdr_type_1.transmitter_id_hi << 8 | evt->hdr.hdr_type_1.transmitter_id_lo);
 }
 
 static void on_pcc_crc_err(const struct nrf_modem_dect_phy_pcc_crc_failure_event *evt)
 {
-	LOG_DBG("pcc_crc_err cb time %"PRIu64"", modem_time);
+	LOG_ERR("pcc_crc_err cb time %"PRIu64"", modem_time);
 }
 
 static void on_pdc_crc_err(const struct nrf_modem_dect_phy_pdc_crc_failure_event *evt)
 {
-	LOG_DBG("pdc_crc_err cb time %"PRIu64"", modem_time);
+	LOG_ERR("pdc_crc_err cb time %"PRIu64"", modem_time);
 }
 
 static void on_latency_info_get(const struct nrf_modem_dect_phy_latency_info_event *evt)
