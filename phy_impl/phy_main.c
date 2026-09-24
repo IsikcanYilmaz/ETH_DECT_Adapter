@@ -65,7 +65,32 @@ volatile enum DectFtState_e ftState = FT_STATE_IDLE;
 
 int mcs_max = -1;
 
-sys_slist_t ops_list;
+// STATISTICS
+uint32_t numSentEthFrames = 0;
+uint32_t numSentDatagrams = 0;
+uint32_t numSentBytes = 0;
+uint32_t numSentDataBytes = 0;
+uint32_t numWastedBytes = 0;
+
+void DectPhy_PrintStatistics(const struct shell *shell)
+{
+  shell_print(shell, "Dect Bridge status:\nSent eth frames: %d \nSent Datagrams: %d \nSent Bytes: %d \nSent SDU Bytes: %d \nWasted Bytes: %d \n", 
+              numSentEthFrames, 
+              numSentDatagrams, 
+              numSentBytes,
+              numSentDataBytes,
+              numWastedBytes
+              );
+}
+
+void DectPhy_ResetStatistics(void)
+{
+  numSentEthFrames = 0;
+  numSentDatagrams = 0;
+  numSentBytes = 0;
+  numSentDataBytes = 0;
+  numWastedBytes = 0;
+}
 
 // FRAGMENTATION
 // Tx
@@ -307,9 +332,9 @@ int DectPhy_TransmitHeadOfQueue(uint32_t handle, uint64_t start_time)
   // If we have an outgoing datagram loaded up, keep sending it. 
   size_t effectivePayloadSize;
   size_t txSizePerMcs = mcsToBytesPerSlot[knobs.mcs];
-  DectPacket_t *fragmentPkt = k_malloc(txSizePerMcs); 
+  DectPacket_t *frameToTx = k_malloc(txSizePerMcs); 
 
-  if (fragmentPkt == NULL) // JON TODO Here if an OOM happens we shoot a blank and drop the whole datagram. there's gotta be a better solution but itll prolly come during a rewrite or something
+  if (frameToTx == NULL) // JON TODO Here if an OOM happens we shoot a blank and drop the whole datagram. there's gotta be a better solution but itll prolly come during a rewrite or something
   {
     LOG_ERR("%s:%d OOM cannot allocate memory for pkt frag. Dropping datagram shooting blank", __FUNCTION__, __LINE__);
     if (currentTxPacket)
@@ -324,13 +349,12 @@ int DectPhy_TransmitHeadOfQueue(uint32_t handle, uint64_t start_time)
       k_free(dispose);
     }
     return DectPhy_Transmit(handle, "NONE", 4, start_time); // TODO Change this to use the actual PDU 
-    // return 1;
   }
   // JON Interesting point here: apparently in 802.15.4 each frame carries data from exactly one datagram. 
   // Question is do we have to do it that way? Assume one slot we pack with the remaining bytes of a datagram, 2 bytes
   // the rest of the slot is going to be empty. Do we want this? Could it even be a paper? lol
   //
-  // TODO JON Pack fragmentPkt with as many SDUs in a loop
+  // TODO JON Pack frameToTx with as many SDUs in a loop
 
   // If nothing is loaded in our currentTxPacket slot, first check if we even have a packet in the queue, if so load it
   if (currentTxPacket == NULL && !k_queue_is_empty(&ethRxQueue))
@@ -357,23 +381,33 @@ int DectPhy_TransmitHeadOfQueue(uint32_t handle, uint64_t start_time)
     }
 
     // Construct the actual packet to be sent with the necessary headers
-    fragmentPkt->flags = 0;
-    fragmentPkt->flags |= (1 << DECT_DATA_PACKET_FLAG_BIT);
-    fragmentPkt->payloadSize = (needsFragmenting) ? (sizeof(DectFragmentationHeader_t) + effectivePayloadSize) : effectivePayloadSize;
+    frameToTx->flags = 0;
+    frameToTx->flags |= (1 << DECT_DATA_PACKET_FLAG_BIT);
+    frameToTx->payloadSize = (needsFragmenting) ? (sizeof(DectFragmentationHeader_t) + effectivePayloadSize) : effectivePayloadSize;
+
+    // If this is a fragment, use up some of our real estate for the fragmentation header
     if (needsFragmenting)
     {
-      fragmentPkt->flags |= (1 << DECT_FRAG_HEADER_EXISTS_FLAG_BIT);
-      DectFragmentationHeader_t *fragHeader = (DectFragmentationHeader_t *) fragmentPkt->payload;
+      frameToTx->flags |= (1 << DECT_FRAG_HEADER_EXISTS_FLAG_BIT);
+      DectFragmentationHeader_t *fragHeader = (DectFragmentationHeader_t *) frameToTx->payload;
       fragHeader->datagramSize = currentTxPacket->size;
       fragHeader->datagramOffset = currentTxDatagramOffset;
       // fragHeader->datagramTag = currentTxDatagramTag;
     }
-    memcpy(((uint8_t *) fragmentPkt) + overheadHeaderSize, (char *) (currentTxPacket->payload + currentTxDatagramOffset), effectivePayloadSize);
 
-    LOG_DBG("FROM OFFSET %d, %d BYTES SENT OF %d. (Header %d: flags 0x%x, plSize %d, totalSize %d)", currentTxDatagramOffset, effectivePayloadSize, currentTxPacket->size, overheadHeaderSize, fragmentPkt->flags, fragmentPkt->payloadSize, effectivePayloadSize + overheadHeaderSize);
-    LOG_HEXDUMP_DBG(fragmentPkt, txSizePerMcs, "FRAGPKT");
+    // Copy the payload data into our frame
+    memcpy(((uint8_t *) frameToTx) + overheadHeaderSize, (char *) (currentTxPacket->payload + currentTxDatagramOffset), effectivePayloadSize);
 
-    err = DectPhy_Transmit(handle, fragmentPkt, txSizePerMcs, start_time);
+    LOG_DBG("FROM OFFSET %d, %d BYTES SENT OF %d. (Header %d: flags 0x%x, plSize %d, totalSize %d)", currentTxDatagramOffset, effectivePayloadSize, currentTxPacket->size, overheadHeaderSize, frameToTx->flags, frameToTx->payloadSize, effectivePayloadSize + overheadHeaderSize);
+    LOG_HEXDUMP_DBG(frameToTx, txSizePerMcs, "FRAGPKT");
+
+    err = DectPhy_Transmit(handle, frameToTx, txSizePerMcs, start_time);
+
+    // Statistics
+    numSentEthFrames++;
+    numSentBytes += txSizePerMcs;
+    numSentDataBytes += effectivePayloadSize;
+    numWastedBytes += (txSizePerMcs - overheadHeaderSize) - effectivePayloadSize;
 
     currentTxDatagramOffset += effectivePayloadSize;
     if (currentTxDatagramOffset >= currentTxPacket->size)
@@ -383,6 +417,7 @@ int DectPhy_TransmitHeadOfQueue(uint32_t handle, uint64_t start_time)
       k_free(currentTxPacket);
       currentTxPacket = NULL;
       currentTxDatagramOffset = 0;
+      numSentDatagrams++;
     }
   }
   else
@@ -392,7 +427,7 @@ int DectPhy_TransmitHeadOfQueue(uint32_t handle, uint64_t start_time)
     err = DectPhy_Transmit(handle, "NONE", 4, start_time); // TODO Change this to use the actual PDU 
   }
 
-  k_free(fragmentPkt);
+  k_free(frameToTx);
   return err;
 }
 
@@ -856,6 +891,7 @@ static int cmd_bridge(const struct shell *shell, size_t argc, char **argv)
     shell_print(shell, "I am : %s", (iAmFt) ? "FT" : "PT");
     shell_print(shell, "State: %d", (iAmFt) ? ftState : ptState);
     shell_print(shell, "Knobs: Mcs: %d, carrier: %d, ops: %d", knobs.mcs, knobs.carrier, knobs.ops_per_beacon);
+    DectPhy_PrintStatistics(shell);
     return 0;
   }
 
@@ -875,6 +911,10 @@ static int cmd_bridge(const struct shell *shell, size_t argc, char **argv)
         shell_print(shell, "Current mcs: %d", knobs.mcs);
       }
     }
+  }
+  if (strncmp(argv[1], "resetstats", 10) == 0)
+  {
+    DectPhy_ResetStatistics();
   }
   if (strncmp(argv[1], "reboot", 6) == 0)
   {
