@@ -920,6 +920,7 @@ static int cmd_bridge(const struct shell *shell, size_t argc, char **argv)
   {
     sys_reboot(SYS_REBOOT_COLD);
   }
+  shell_print("DONE");
   return 0;
 }
 
