@@ -593,7 +593,7 @@ int DectPhy_TransmitHeadOfQueue(uint32_t handle, uint64_t start_time)
   size_t txSizePerMcs = mcsToBytesPerSlot[knobs.mcs];
   DectPacket_t *frameToTx = k_malloc(txSizePerMcs); 
 
-  memset(frameToTx, 0xff, txSizePerMcs); // TEST TODO make sure this is not needed. This is here so that we know when a frame no longer has data
+  // memset(frameToTx, 0xff, txSizePerMcs); // TEST TODO make sure this is not needed. This is here so that we know when a frame no longer has data
 
   size_t numBytesToSend = DectPhy_PackFrame(frameToTx, txSizePerMcs);
 
