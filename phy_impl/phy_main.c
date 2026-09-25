@@ -96,7 +96,7 @@ void DectPhy_ResetStatistics(void)
 // Tx
 struct LeanWiznet_Packet *currentTxDatagram = NULL;
 uint16_t currentTxDatagramOffset = 0;
-uint16_t currentTxDatagramRemainingBytes = 0;
+int16_t currentTxDatagramRemainingBytes = 0;
 uint16_t currentTxDatagramTag = 0;
 
 // Rx
@@ -370,7 +370,8 @@ int DectPhy_HandleSDUFragment(char *data, size_t len)
   if (isFragmented) 
   {
     // If the SDU we got is a fragment AND we're already reassembling another packet
-    if (sduSize < sizeof(DectFragmentationHeader_t)) // Sanity check
+    // if (sduSize < sizeof(DectFragmentationHeader_t)) // Sanity check
+    if (sduSize == 0)
     {
       LOG_ERR("%s:%d Bad SDU Size %d!", __FUNCTION__, __LINE__, sduSize);
       LOG_HEXDUMP_ERR(data, len, "BAD PKT");
@@ -378,7 +379,7 @@ int DectPhy_HandleSDUFragment(char *data, size_t len)
       currentRxDatagram = NULL;
       return 1;
     }
-    sduSize -= sizeof(DectFragmentationHeader_t);
+    // sduSize -= sizeof(DectFragmentationHeader_t);
     LOG_DBG("FRAGMENT: OFFSET %d, SIZE %d, FRAGMENT PL SIZE %d", fragHeader->datagramOffset, fragHeader->datagramSize, sduSize);
 
     // Sanity check: if the size of the data portion of the current fragment packet 
@@ -476,7 +477,7 @@ size_t DectPhy_PackFrame(DectPacket_t *frame, size_t frameSize)
 
   int numSdusTouched = 0; // Bytes from this many SDUs are in this frame
   
-  while (remainingFrameSize)
+  while (remainingFrameSize > sizeof(DectPacket_t))
   {
     // TODO prioritize SDUs and IEs here
     
@@ -505,8 +506,15 @@ size_t DectPhy_PackFrame(DectPacket_t *frame, size_t frameSize)
     }
 
     // Here we must have a loaded up current Tx Datagram. Check if it needs or already is fragmenting
-    bool needsFragmenting = (currentTxDatagramOffset || currentTxDatagram->size > (remainingFrameSize - sizeof(DectPacket_t)));
+    bool needsFragmenting = (currentTxDatagramOffset || \
+                             (sizeof(DectPacket_t) + currentTxDatagramRemainingBytes) > remainingFrameSize);
     size_t overheadHeaderSize = (needsFragmenting) ? (sizeof(DectFragmentationHeader_t) + sizeof(DectPacket_t)) : (sizeof(DectPacket_t));
+  
+    // Not enough room for the headerts plus at least 1 payload byte. Leave the datagram for the next frame
+    if (remainingFrameSize <= overheadHeaderSize)
+    {
+      break;
+    }
 
     // Find the SDU size
     size_t sduSize;
@@ -585,7 +593,7 @@ int DectPhy_TransmitHeadOfQueue(uint32_t handle, uint64_t start_time)
   size_t txSizePerMcs = mcsToBytesPerSlot[knobs.mcs];
   DectPacket_t *frameToTx = k_malloc(txSizePerMcs); 
 
-  // memset(frameToTx, 0x00, txSizePerMcs); // TEST
+  memset(frameToTx, 0xff, txSizePerMcs); // TEST TODO make sure this is not needed. This is here so that we know when a frame no longer has data
 
   size_t numBytesToSend = DectPhy_PackFrame(frameToTx, txSizePerMcs);
 
