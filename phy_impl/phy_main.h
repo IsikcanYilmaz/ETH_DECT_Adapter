@@ -37,6 +37,9 @@
 #define DECT_BEACON_MAGIC_STRING ("BEAC")
 
 // DECT MAC Message structures
+
+#define DECT_MESSAGE_END_BYTE (0xff) // TODO this may or may not be needed, but when we pack in SDUs and there is still remaining free bytes, make the first free byte 0xff so that when we're unpacking we know to stop there
+
 // This is the frame structure that we encapsulate every piece of data we send over DECT with
 #define DECT_DATA_PACKET_FLAG_BIT 0
 #define DECT_BEACON_FLAG_BIT 1
@@ -204,6 +207,7 @@ int DectPhy_ReceiveContinuous(uint32_t handle, uint32_t durationTicks, uint64_t 
 int DectPhy_TransmitHeadOfQueue(uint32_t handle, uint64_t start_time);
 int DectPhy_TransmitBeacon(uint64_t start_time);
 int DectPhy_HandleIncomingPacketFragment(char *data, size_t len);
+size_t DectPhy_UnpackFrameAndProcessSDUs(DectPacket_t *frame, size_t frameSize);
 
 // Util
 bool DectPhy_PktIsBeacon(char *pkt);

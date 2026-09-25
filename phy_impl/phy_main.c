@@ -94,8 +94,9 @@ void DectPhy_ResetStatistics(void)
 
 // FRAGMENTATION
 // Tx
-struct LeanWiznet_Packet *currentTxPacket = NULL;
+struct LeanWiznet_Packet *currentTxDatagram = NULL;
 uint16_t currentTxDatagramOffset = 0;
+uint16_t currentTxDatagramRemainingBytes = 0;
 uint16_t currentTxDatagramTag = 0;
 
 // Rx
@@ -324,179 +325,8 @@ int DectPhy_Transmit(uint32_t handle, void *data, size_t data_len, uint64_t star
 	return 0;
 }
 
-int DectPhy_TransmitHeadOfQueue(uint32_t handle, uint64_t start_time)
-{
-  int err;
-  // struct DectInFlightPktStub_s *inFlight = k_malloc(sizeof(struct DectInFlightPktStub_s));
-  
-  // If we have an outgoing datagram loaded up, keep sending it. 
-  size_t effectivePayloadSize;
-  size_t txSizePerMcs = mcsToBytesPerSlot[knobs.mcs];
-  DectPacket_t *frameToTx = k_malloc(txSizePerMcs); 
-
-  if (frameToTx == NULL) // JON TODO Here if an OOM happens we shoot a blank and drop the whole datagram. there's gotta be a better solution but itll prolly come during a rewrite or something
-  {
-    LOG_ERR("%s:%d OOM cannot allocate memory for pkt frag. Dropping datagram shooting blank", __FUNCTION__, __LINE__);
-    if (currentTxPacket)
-    {
-      k_free(currentTxPacket);
-      currentTxPacket = NULL;
-      currentTxDatagramOffset = 0;
-    }
-    if (!k_queue_is_empty(&ethRxQueue))
-    {
-      struct LeanWiznet_Packet *dispose = k_queue_get(&ethRxQueue, K_NO_WAIT);
-      k_free(dispose);
-    }
-    return DectPhy_Transmit(handle, "NONE", 4, start_time); // TODO Change this to use the actual PDU 
-  }
-  // JON Interesting point here: apparently in 802.15.4 each frame carries data from exactly one datagram. 
-  // Question is do we have to do it that way? Assume one slot we pack with the remaining bytes of a datagram, 2 bytes
-  // the rest of the slot is going to be empty. Do we want this? Could it even be a paper? lol
-  //
-  // TODO JON Pack frameToTx with as many SDUs in a loop
-
-  // If nothing is loaded in our currentTxPacket slot, first check if we even have a packet in the queue, if so load it
-  if (currentTxPacket == NULL && !k_queue_is_empty(&ethRxQueue))
-  {
-    currentTxPacket = (struct LeanWiznet_Packet *) k_queue_get(&ethRxQueue, K_FOREVER);
-    currentTxDatagramOffset = 0;
-    LOG_DBG("LOADED UP DATAGRAM %d. %d BYTES", currentTxDatagramTag, currentTxPacket->size);
-    LOG_HEXDUMP_DBG(currentTxPacket->payload, currentTxPacket->size, "FULL DATAGRAM");
-  }
-
-  if (currentTxPacket)
-  {
-    // First decide if it needs to be fragmented.
-    bool needsFragmenting = (currentTxDatagramOffset || currentTxPacket->size > (txSizePerMcs - sizeof(DectPacket_t)));
-
-    // Find the available payload size
-    size_t overheadHeaderSize = (needsFragmenting) ? (sizeof(DectFragmentationHeader_t) + sizeof(DectPacket_t)) : (sizeof(DectPacket_t));
-    effectivePayloadSize = txSizePerMcs - overheadHeaderSize;
-
-    // Check if we can pack the remaining bytes in this fragment
-    if (currentTxPacket->size - currentTxDatagramOffset < effectivePayloadSize)
-    {
-      effectivePayloadSize = currentTxPacket->size - currentTxDatagramOffset;
-    }
-
-    // Construct the actual packet to be sent with the necessary headers
-    frameToTx->flags = 0;
-    frameToTx->flags |= (1 << DECT_DATA_PACKET_FLAG_BIT);
-    frameToTx->payloadSize = (needsFragmenting) ? (sizeof(DectFragmentationHeader_t) + effectivePayloadSize) : effectivePayloadSize;
-
-    // If this is a fragment, use up some of our real estate for the fragmentation header
-    if (needsFragmenting)
-    {
-      frameToTx->flags |= (1 << DECT_FRAG_HEADER_EXISTS_FLAG_BIT);
-      DectFragmentationHeader_t *fragHeader = (DectFragmentationHeader_t *) frameToTx->payload;
-      fragHeader->datagramSize = currentTxPacket->size;
-      fragHeader->datagramOffset = currentTxDatagramOffset;
-      // fragHeader->datagramTag = currentTxDatagramTag;
-    }
-
-    // Copy the payload data into our frame
-    memcpy(((uint8_t *) frameToTx) + overheadHeaderSize, (char *) (currentTxPacket->payload + currentTxDatagramOffset), effectivePayloadSize);
-
-    LOG_DBG("FROM OFFSET %d, %d BYTES SENT OF %d. (Header %d: flags 0x%x, plSize %d, totalSize %d)", currentTxDatagramOffset, effectivePayloadSize, currentTxPacket->size, overheadHeaderSize, frameToTx->flags, frameToTx->payloadSize, effectivePayloadSize + overheadHeaderSize);
-    LOG_HEXDUMP_DBG(frameToTx, txSizePerMcs, "FRAGPKT");
-
-    err = DectPhy_Transmit(handle, frameToTx, txSizePerMcs, start_time);
-
-    // Statistics
-    numSentEthFrames++;
-    numSentBytes += txSizePerMcs;
-    numSentDataBytes += effectivePayloadSize;
-    numWastedBytes += (txSizePerMcs - overheadHeaderSize) - effectivePayloadSize;
-
-    currentTxDatagramOffset += effectivePayloadSize;
-    if (currentTxDatagramOffset >= currentTxPacket->size)
-    {
-      LOG_DBG("ALL FRAGMENTS OF TAG %d TRANSMITTED", currentTxDatagramTag);
-      currentTxDatagramTag++;
-      k_free(currentTxPacket);
-      currentTxPacket = NULL;
-      currentTxDatagramOffset = 0;
-      numSentDatagrams++;
-    }
-  }
-  else
-  {
-    // If we dont have a loaded up outgoing datagram, send a blank. TODO bad 
-    LOG_DBG("NO PKT FROM ETH. SENDING BLANK TX");
-    err = DectPhy_Transmit(handle, "NONE", 4, start_time); // TODO Change this to use the actual PDU 
-  }
-
-  k_free(frameToTx);
-  return err;
-}
-
-int DectPhy_TransmitBeacon(uint64_t start_time)
-{
-  int err; 
-  // TODO more in depth logic
-  master_beacon.this_beacon_time = start_time;
-  uint32_t expected_next_beacon_offset = (beaconDelta) ? (uint32_t) beaconDelta : (uint32_t) ((2*knobs.ops_per_beacon) * (DECT_SLOT_DURATION_TICK + DECT_HEADROOM + opTransitionLatency)); // TODO bad solution but will do. basically we're just sending the delta in ticks, between this xmit and the previous one. it worked
-  master_beacon.modem_ticks_until_next_beacon = expected_next_beacon_offset; // TODO the very first beacon does not have a correct number of $modem_ticks_until_next_beacon. as a result the pt can only latch 2 beacon later. not a showstopper but we should fix this
-
-  // TODO TESTING
-  // static bool first = false;
-  // if (!first)
-  // {
-  //   if (master_beacon.modem_ticks_until_next_beacon == 0)
-  //   {
-  //     LOG_ERR("BEACON Tix until next is 0. Making assumptions... ops per beacon %d", knobs.ops_per_beacon);
-  //     LOG_ERR("Assuming %llu ticks", (uint32_t) ((2*knobs.ops_per_beacon + 1) * (DECT_SLOT_DURATION_TICK + DECT_HEADROOM + opTransitionLatency)));
-  //   }
-  //   else
-  //   {
-  //     LOG_ERR("FIRST tix until next %d, beacondelta %llu", master_beacon.modem_ticks_until_next_beacon, beaconDelta);
-  //     first = true;
-  //   }
-  // }
-
-  // TODO make these generic, reuse
-  struct phy_ctrl_field_common header = {
-    .header_format = 0x0,
-    .packet_length_type = DECT_PACKET_LENGTH_SLOT,
-    .packet_length = 0x00,
-    .short_network_id = (CONFIG_APP_NETWORK_ID & 0xff),
-    .transmitter_id_hi = (device_id >> 8),
-    .transmitter_id_lo = (device_id & 0xff),
-    .transmit_power = CONFIG_APP_TX_POWER,
-    .reserved = 0,
-    .df_mcs = knobs.mcs,
-  };
-
-  struct nrf_modem_dect_phy_tx_params beacon_op_params = {
-    .start_time = start_time,
-    .handle = BEACON_TX_HANDLE,
-    .network_id = CONFIG_APP_NETWORK_ID,
-    .phy_type = 0,
-    .lbt_rssi_threshold_max = 0,
-    .carrier = knobs.carrier,
-    .lbt_period = 0,// NRF_MODEM_DECT_LBT_PERIOD_MAX, // JON EXPERIMENTAL
-    .phy_header = (union nrf_modem_dect_phy_hdr *) &header,
-    .data = &master_beacon,
-    .data_size = sizeof(DectBeaconMessage_t),
-  };
-
-  err = nrf_modem_dect_phy_tx(&beacon_op_params);
-	if (err != 0) {
-		return err;
-	}
-
-  return 0;
-}
-
-// enqueue packets here to send them over the ethernet connection
-void DectPhy_EnqueueEthTx(void *pkt)
-{
-  k_queue_append(&ethTxQueue, pkt);
-}
-
 // This is the funnel that should handle all higher layer data to be then passed along to the Wiznet shield
-int DectPhy_HandleIncomingPacketFragment(char *data, size_t len)
+int DectPhy_HandleSDUFragment(char *data, size_t len)
 {
   int err = 0;
   DectPacket_t *dectPkt = (DectPacket_t *) data;
@@ -508,7 +338,7 @@ int DectPhy_HandleIncomingPacketFragment(char *data, size_t len)
   char *sduPayload = (isFragmented) ? ((char *) dectPkt->payload) + (sizeof(DectFragmentationHeader_t)) : ((char *) dectPkt->payload);
   size_t sduSize = dectPkt->payloadSize;
   
-  LOG_DBG("RECEIVED DATA %d B. %s %s", sduSize, (isDataPacket) ? "[DATA]":"", (isFragmented) ? "[FRAG]":"");
+  LOG_DBG("RECEIVED SDU DATA %d B. %s %s", sduSize, (isDataPacket) ? "[DATA]":"", (isFragmented) ? "[FRAG]":"");
   LOG_HEXDUMP_DBG(data, len, "FUNNEL");
 
   // We just received some SDU data. now we either
@@ -596,6 +426,255 @@ int DectPhy_HandleIncomingPacketFragment(char *data, size_t len)
   }
 
   return err;
+}
+
+// This is the funnel where the packets that we receive from the DECT channel should go to.
+size_t DectPhy_UnpackFrameAndProcessSDUs(DectPacket_t *frame, size_t frameSize)
+{
+  DectPacket_t *currentSdu = frame;
+  DectPacket_t *nextSdu = NULL;
+  int remainingFrameSize = frameSize;
+  int numSdusInFrame = 0;
+
+  int cnt = 0;
+
+  // Go through each header and SDU. If we fully reassemble a datagram, pass it to the Wiznet layer
+  while(remainingFrameSize)
+  {
+    if (currentSdu->flags == 0x00 || currentSdu->flags == 0xff) //  TODO decide this
+    {
+      LOG_DBG("0 FLAGS. DONE");
+      break;
+    }
+    bool isData = ((currentSdu->flags & (1 << DECT_DATA_PACKET_FLAG_BIT)) > 0);
+    bool isFragment = ((currentSdu->flags & (1 << DECT_FRAG_HEADER_EXISTS_FLAG_BIT)) > 0);
+    size_t headerPlusSduSize = sizeof(DectPacket_t) + (currentSdu->payloadSize) + ((isFragment) ? sizeof(DectFragmentationHeader_t) : 0);
+    nextSdu = (uint8_t *) currentSdu + headerPlusSduSize;
+    LOG_DBG("SDU %d. FLAGS 0x%x D%d F%d, PAYLOAD SIZE %d, TOTAL SIZE %d, FRAME SIZE %d", numSdusInFrame, currentSdu->flags, isData, isFragment, currentSdu->payloadSize, currentSdu->payloadSize + 2, frameSize);
+    LOG_DBG("SDU 0x%x - 0x%x. REMAINING %d", currentSdu, nextSdu, remainingFrameSize);
+    LOG_HEXDUMP_DBG(currentSdu, headerPlusSduSize, "HEADER PLUS SDU");
+
+    // We dissected a fragment. Pass the pointer along
+    DectPhy_HandleSDUFragment((char *) currentSdu, headerPlusSduSize);
+
+    remainingFrameSize -= headerPlusSduSize;
+    numSdusInFrame++;
+    currentSdu = (DectPacket_t *) nextSdu;
+  }
+  
+  LOG_DBG("UNPACKED %d SDUS. REMAINING FRAME SIZE %d", numSdusInFrame, remainingFrameSize);
+  return 0;
+}
+
+size_t DectPhy_PackFrame(DectPacket_t *frame, size_t frameSize)
+{
+  char *head = (char *) frame;
+  char *tail = (char *) frame;
+  size_t remainingFrameSize = frameSize;
+  size_t numBytesPacked = 0;
+  size_t numGoodBytesPacked = 0;
+
+  int numSdusTouched = 0; // Bytes from this many SDUs are in this frame
+  
+  while (remainingFrameSize)
+  {
+    // TODO prioritize SDUs and IEs here
+    
+    // First, check if we dont have a loaded up datagram. If not, load it up
+    if (currentTxDatagram == NULL && !k_queue_is_empty(&ethRxQueue))
+    {
+      currentTxDatagram = (struct LeanWiznet_Packet *) k_queue_get(&ethRxQueue, K_FOREVER);
+      currentTxDatagramOffset = 0;
+      currentTxDatagramRemainingBytes = currentTxDatagram->size;
+      LOG_DBG("LOADED UP DATAGRAM %d. %d BYTES", currentTxDatagramTag, currentTxDatagram->size);
+    }
+
+    // At this point if we dont have a currentTxDatagram, there's nothing to be sent. can break out
+    if (currentTxDatagram == NULL)
+    {
+      LOG_DBG("NO DATAGRAM IN THE QUEUE");
+      break;
+    }
+
+    LOG_DBG("~~ PACK FRAME LOOP %d. REMAINING BYTES IN THE FRAME %d ~~" , numSdusTouched, remainingFrameSize);
+    numSdusTouched++; // TODO rm
+    if (numSdusTouched == 5)
+    {
+      LOG_ERR("INF LOOP. BREAKING");
+      break;
+    }
+
+    // Here we must have a loaded up current Tx Datagram. Check if it needs or already is fragmenting
+    bool needsFragmenting = (currentTxDatagramOffset || currentTxDatagram->size > (remainingFrameSize - sizeof(DectPacket_t)));
+    size_t overheadHeaderSize = (needsFragmenting) ? (sizeof(DectFragmentationHeader_t) + sizeof(DectPacket_t)) : (sizeof(DectPacket_t));
+
+    // Find the SDU size
+    size_t sduSize;
+    if (currentTxDatagramRemainingBytes <= (remainingFrameSize - overheadHeaderSize)) // If datagram's remaining bytes can fit into this current SDU
+    {
+      sduSize = currentTxDatagramRemainingBytes;
+    }
+    else // If it cannot fit
+    {
+      sduSize = (remainingFrameSize - overheadHeaderSize);
+    }
+
+    // Start filling out the headers
+    DectPacket_t *subframe = head;
+    subframe->flags = 0;
+    subframe->flags |= (1 << DECT_DATA_PACKET_FLAG_BIT); // TODO only do this if this is a data SDU
+    subframe->payloadSize = sduSize;
+    
+    // If this is a fragment, use up some of our real estate for the fragmentation header
+    if (needsFragmenting)
+    {
+      subframe->flags |= (1 << DECT_FRAG_HEADER_EXISTS_FLAG_BIT); 
+      DectFragmentationHeader_t *fragHeader = (DectFragmentationHeader_t *) subframe->payload;
+      fragHeader->datagramSize = currentTxDatagram->size;
+      fragHeader->datagramOffset = currentTxDatagramOffset;
+      // fragHeader->datagramTag = currentTxDatagramTag;
+    }
+
+    LOG_DBG("DATAGRAM %d: OFFSET %d, %d BYTES PACKED", currentTxDatagramTag, currentTxDatagramOffset, sduSize);
+    LOG_DBG("FRAME: SIZE %d, #SDU %d, HEADER SIZE %d SDU SIZE %d", frameSize, numSdusTouched, overheadHeaderSize, sduSize);
+    // memset(((uint8_t *) head + overheadHeaderSize), (uint8_t) currentTxDatagramTag, sduSize); // TEST 
+    memcpy(((uint8_t *) head + overheadHeaderSize), (uint8_t *) currentTxDatagram->payload + currentTxDatagramOffset, sduSize);
+    head += (overheadHeaderSize + sduSize);
+
+    // Book keep
+    numBytesPacked += sduSize + overheadHeaderSize;
+    numGoodBytesPacked += sduSize;
+    remainingFrameSize -= (sduSize + overheadHeaderSize);
+
+    currentTxDatagramRemainingBytes -= sduSize;
+    currentTxDatagramOffset += sduSize;
+
+    if (currentTxDatagramRemainingBytes == 0)
+    {
+      LOG_DBG("ALL FRAGMENTS OF TAG %d PACKED", currentTxDatagramTag);
+      currentTxDatagramTag++;
+      k_free(currentTxDatagram);
+      currentTxDatagram = NULL;
+      currentTxDatagramOffset = 0;
+      numSentDatagrams++;
+    }
+  }
+
+  if (remainingFrameSize) // If there's bytes remaining, make the first free byte 0xff
+  {
+    *((uint8_t *) frame + (frameSize - remainingFrameSize)) = DECT_MESSAGE_END_BYTE;
+  }
+
+  if (numBytesPacked)
+  {
+    LOG_DBG("PACKED %d GOOD BYTES, %d SDUS INTO %d BYTE FRAME", numGoodBytesPacked, numSdusTouched, frameSize);
+    LOG_HEXDUMP_DBG(frame, frameSize, "FRAME");
+    LOG_DBG("------------");
+    LOG_DBG("FRAME 0x%x HEAD 0x%x REMAINING %d", (uint8_t *) frame, (uint8_t *) head, remainingFrameSize);
+    // DectPhy_UnpackFrameAndProcessSDUs(frame, frameSize); // TODO TESTING
+  }
+
+  return numBytesPacked;
+}
+
+int DectPhy_TransmitHeadOfQueue(uint32_t handle, uint64_t start_time)
+{
+  int err;
+  // If we have an outgoing datagram loaded up, keep sending it. 
+  size_t effectivePayloadSize;
+  size_t txSizePerMcs = mcsToBytesPerSlot[knobs.mcs];
+  DectPacket_t *frameToTx = k_malloc(txSizePerMcs); 
+
+  // memset(frameToTx, 0x00, txSizePerMcs); // TEST
+
+  size_t numBytesToSend = DectPhy_PackFrame(frameToTx, txSizePerMcs);
+
+  // TODO Handle OOM. PackFrame() now handles the loading and unloading of currentTxDatagram
+  if (frameToTx == NULL) // JON TODO Here if an OOM happens we shoot a blank and drop the whole datagram. there's
+  {
+    LOG_ERR("%s:%d OOM", __FUNCTION__, __LINE__);
+    return 1;
+  }
+
+  if (numBytesToSend)
+  {
+    // We have a MTU to send. Send it off
+    LOG_DBG("MTU BYTES TO SEND %d", numBytesToSend);
+    err = DectPhy_Transmit(handle, frameToTx, numBytesToSend, start_time);
+  }
+  else
+  {
+    // If we dont have a loaded up outgoing datagram, send a blank. TODO bad 
+    LOG_DBG("NO PKT FROM ETH. SENDING BLANK TX");
+    err = DectPhy_Transmit(handle, "NONE", 4, start_time); // TODO Change this to use the actual PDU 
+  }
+
+  k_free(frameToTx);
+  return err;
+}
+
+int DectPhy_TransmitBeacon(uint64_t start_time)
+{
+  int err; 
+  // TODO more in depth logic
+  master_beacon.this_beacon_time = start_time;
+  uint32_t expected_next_beacon_offset = (beaconDelta) ? (uint32_t) beaconDelta : (uint32_t) ((2*knobs.ops_per_beacon) * (DECT_SLOT_DURATION_TICK + DECT_HEADROOM + opTransitionLatency)); // TODO bad solution but will do. basically we're just sending the delta in ticks, between this xmit and the previous one. it worked
+  master_beacon.modem_ticks_until_next_beacon = expected_next_beacon_offset; // TODO the very first beacon does not have a correct number of $modem_ticks_until_next_beacon. as a result the pt can only latch 2 beacon later. not a showstopper but we should fix this
+
+  // TODO TESTING
+  // static bool first = false;
+  // if (!first)
+  // {
+  //   if (master_beacon.modem_ticks_until_next_beacon == 0)
+  //   {
+  //     LOG_ERR("BEACON Tix until next is 0. Making assumptions... ops per beacon %d", knobs.ops_per_beacon);
+  //     LOG_ERR("Assuming %llu ticks", (uint32_t) ((2*knobs.ops_per_beacon + 1) * (DECT_SLOT_DURATION_TICK + DECT_HEADROOM + opTransitionLatency)));
+  //   }
+  //   else
+  //   {
+  //     LOG_ERR("FIRST tix until next %d, beacondelta %llu", master_beacon.modem_ticks_until_next_beacon, beaconDelta);
+  //     first = true;
+  //   }
+  // }
+
+  // TODO make these generic, reuse
+  struct phy_ctrl_field_common header = {
+    .header_format = 0x0,
+    .packet_length_type = DECT_PACKET_LENGTH_SLOT,
+    .packet_length = 0x00,
+    .short_network_id = (CONFIG_APP_NETWORK_ID & 0xff),
+    .transmitter_id_hi = (device_id >> 8),
+    .transmitter_id_lo = (device_id & 0xff),
+    .transmit_power = CONFIG_APP_TX_POWER,
+    .reserved = 0,
+    .df_mcs = knobs.mcs,
+  };
+
+  struct nrf_modem_dect_phy_tx_params beacon_op_params = {
+    .start_time = start_time,
+    .handle = BEACON_TX_HANDLE,
+    .network_id = CONFIG_APP_NETWORK_ID,
+    .phy_type = 0,
+    .lbt_rssi_threshold_max = 0,
+    .carrier = knobs.carrier,
+    .lbt_period = 0,// NRF_MODEM_DECT_LBT_PERIOD_MAX, // JON EXPERIMENTAL
+    .phy_header = (union nrf_modem_dect_phy_hdr *) &header,
+    .data = &master_beacon,
+    .data_size = sizeof(DectBeaconMessage_t),
+  };
+
+  err = nrf_modem_dect_phy_tx(&beacon_op_params);
+	if (err != 0) {
+		return err;
+	}
+
+  return 0;
+}
+
+// enqueue packets here to send them over the ethernet connection
+void DectPhy_EnqueueEthTx(void *pkt)
+{
+  k_queue_append(&ethTxQueue, pkt);
 }
 
 int DectPhy_CancelAllPendingOps(void)
@@ -920,7 +999,7 @@ static int cmd_bridge(const struct shell *shell, size_t argc, char **argv)
   {
     sys_reboot(SYS_REBOOT_COLD);
   }
-  shell_print("DONE");
+  shell_print(shell, "DONE");
   return 0;
 }
 

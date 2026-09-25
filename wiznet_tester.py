@@ -9,7 +9,7 @@ import argparse
 Forge a custom IP Packet and send it to our w5500 interface 
 """
 
-def main(iface=1, length=0):
+def main(iface=1, length=0, times=1):
     sourceMAC="74:5d:22:8d:74:0d"
     destinationMAC="a0:ce:c8:1d:cb:ce"
     ifacename="enp1s0f0"
@@ -24,6 +24,7 @@ def main(iface=1, length=0):
     etherType = int(etherTypeHex, 16)
 
     plStr = "IMAMHATIPLERKAPATILSINN"
+    # plStr = "a"
     payloadLength = len(plStr) if length == 0 else length 
 
     payload = bytearray(plStr, 'utf-8')
@@ -38,12 +39,13 @@ def main(iface=1, length=0):
 
     print("Hexdump:")
     chexdump(packet)
-    print(f"\nPacket length {len(packet)}")
-    srp(packet, iface=ifacename, timeout=0)
+    print(f"\nPacket length {len(packet)}. Sending packet {times} times")
+    srp([packet] * times, iface=ifacename, timeout=0)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--two", action="store_true", default=False)
     parser.add_argument("--len", type=int, default=0)
+    parser.add_argument("--times", type=int, default=1)
     args = parser.parse_args()
-    main(iface=2 if args.two else 1, length=args.len)
+    main(iface=2 if args.two else 1, length=args.len, times=args.times)

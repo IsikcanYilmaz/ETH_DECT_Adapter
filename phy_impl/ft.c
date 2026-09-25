@@ -29,7 +29,8 @@ static void mock_pdc(const struct nrf_modem_dect_phy_pdc_event *evt)
   LOG_HEXDUMP_DBG(evt->data, evt->len, "RX");
   if (!DectPhy_PktIsNone(evt->data))
   {
-    DectPhy_HandleIncomingPacketFragment(evt->data, evt->len);
+    // DectPhy_HandleIncomingPacketFragment(evt->data, evt->len);
+    DectPhy_UnpackFrameAndProcessSDUs(evt->data, evt->len);
   }
 }
 

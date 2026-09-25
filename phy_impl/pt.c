@@ -178,7 +178,8 @@ static void mock_pdc(const struct nrf_modem_dect_phy_pdc_event *evt) // TODO mak
     {
       LOG_DBG("PT RECEIVED %d BYTES FROM FT IN SLOT %d", evt->len, slotCounter);
       LOG_HEXDUMP_DBG(evt->data, evt->len, "RX");
-      DectPhy_HandleIncomingPacketFragment(evt->data, evt->len);
+      // DectPhy_HandleIncomingPacketFragment(evt->data, evt->len);
+      DectPhy_UnpackFrameAndProcessSDUs(evt->data, evt->len);
     }
 
     gpio_pin_toggle_dt(ptDlSwitch);
