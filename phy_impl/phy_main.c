@@ -267,6 +267,23 @@ int DectPhy_Receive(uint32_t handle, uint32_t durationTicks, uint64_t start_time
 // TODO find a better way lol
 void DectPhy_InFlightCompleted(void)
 {
+  // TODO depricating the inflight business
+  // // Tx just completed. Free the pointer of what just got tx'd. 
+  // if (k_queue_is_empty(&inFlightQueue))
+  // {
+  //   LOG_ERR("TX COMPLETE BUT IN FLIGHT QUEUE EMPTY!!!");
+  // }
+  // else
+  // {
+  //   struct DectInFlightPktStub_s *pktToFree = k_queue_get(&inFlightQueue, K_FOREVER);
+  //   if (pktToFree)
+  //   {
+  //     if (pktToFree->ptr)
+  //       LOG_DBG("IN FLIGHT PKT FROM HANDLE %d DONE. 0x%08x. FREEING", pktToFree->handle, pktToFree->ptr);
+  //     k_free(pktToFree->ptr);
+  //     k_free(pktToFree);
+  //   }
+  // }
 }
 
 int DectPhy_Transmit(uint32_t handle, void *data, size_t data_len, uint64_t start_time)
@@ -321,7 +338,7 @@ int DectPhy_HandleSDUFragment(char *data, size_t len)
   char *sduPayload = (isFragmented) ? ((char *) dectPkt->payload) + (sizeof(DectFragmentationHeader_t)) : ((char *) dectPkt->payload);
   size_t sduSize = dectPkt->payloadSize;
   
-  LOG_WRN("RECEIVED SDU DATA %d B. %s %s", sduSize, (isDataPacket) ? "[DATA]":"", (isFragmented) ? "[FRAG]":"");
+  LOG_DBG("RECEIVED SDU DATA %d B. %s %s", sduSize, (isDataPacket) ? "[DATA]":"", (isFragmented) ? "[FRAG]":"");
   LOG_HEXDUMP_DBG(data, len, "FUNNEL");
 
   // We just received some SDU data. now we either
@@ -347,7 +364,7 @@ int DectPhy_HandleSDUFragment(char *data, size_t len)
       LOG_ERR("%s:%d OOM", __FUNCTION__, __LINE__);
       return 1;
     }
-    LOG_WRN("%sNEW PACKET. DATAGRAM SIZE %d", (isFragmented) ? "ASSEMBLING " : "", currentRxDatagramSize);
+    LOG_DBG("%sNEW PACKET. DATAGRAM SIZE %d", (isFragmented) ? "ASSEMBLING " : "", currentRxDatagramSize);
   }
 
   if (isFragmented) 
@@ -363,7 +380,7 @@ int DectPhy_HandleSDUFragment(char *data, size_t len)
       return 1;
     }
     // sduSize -= sizeof(DectFragmentationHeader_t);
-    LOG_WRN("FRAGMENT: OFFSET %d, SIZE %d, FRAGMENT PL SIZE %d", fragHeader->datagramOffset, fragHeader->datagramSize, sduSize);
+    LOG_DBG("FRAGMENT: OFFSET %d, SIZE %d, FRAGMENT PL SIZE %d", fragHeader->datagramOffset, fragHeader->datagramSize, sduSize);
 
     // Sanity check: if the size of the data portion of the current fragment packet 
     if (fragHeader->datagramOffset + sduSize <= currentRxDatagramSize) 
@@ -398,7 +415,7 @@ int DectPhy_HandleSDUFragment(char *data, size_t len)
 
   if (reassemblyComplete)
   {
-    LOG_WRN("REASSEMBLY COMPLETE. SENDING OFF %d BYTES TO ETH", currentRxDatagramSize);
+    LOG_DBG("REASSEMBLY COMPLETE. SENDING OFF %d BYTES TO ETH", currentRxDatagramSize);
     LOG_HEXDUMP_DBG(currentRxDatagram->payload, currentRxDatagramSize, "REASSEMBLY COMPLETE");
     
     currentRxDatagram->size = currentRxDatagramSize;
@@ -434,9 +451,9 @@ size_t DectPhy_UnpackFrameAndProcessSDUs(DectPacket_t *frame, size_t frameSize)
     bool isFragment = ((currentSdu->flags & (1 << DECT_FRAG_HEADER_EXISTS_FLAG_BIT)) > 0);
     size_t headerPlusSduSize = sizeof(DectPacket_t) + (currentSdu->payloadSize) + ((isFragment) ? sizeof(DectFragmentationHeader_t) : 0);
     nextSdu = (uint8_t *) currentSdu + headerPlusSduSize;
-    LOG_WRN("SDU %d. FLAGS 0x%x D%d F%d, PAYLOAD SIZE %d, TOTAL SIZE %d, FRAME SIZE %d", numSdusInFrame, currentSdu->flags, isData, isFragment, currentSdu->payloadSize, currentSdu->payloadSize + 2, frameSize);
-    LOG_WRN("SDU 0x%x - 0x%x. REMAINING %d", currentSdu, nextSdu, remainingFrameSize);
-    LOG_HEXDUMP_WRN(currentSdu, headerPlusSduSize, "HEADER PLUS SDU");
+    LOG_DBG("SDU %d. FLAGS 0x%x D%d F%d, PAYLOAD SIZE %d, TOTAL SIZE %d, FRAME SIZE %d", numSdusInFrame, currentSdu->flags, isData, isFragment, currentSdu->payloadSize, currentSdu->payloadSize + 2, frameSize);
+    LOG_DBG("SDU 0x%x - 0x%x. REMAINING %d", currentSdu, nextSdu, remainingFrameSize);
+    LOG_HEXDUMP_DBG(currentSdu, headerPlusSduSize, "HEADER PLUS SDU");
 
     // We dissected a fragment. Pass the pointer along
     DectPhy_HandleSDUFragment((char *) currentSdu, headerPlusSduSize);
@@ -446,7 +463,7 @@ size_t DectPhy_UnpackFrameAndProcessSDUs(DectPacket_t *frame, size_t frameSize)
     currentSdu = (DectPacket_t *) nextSdu;
   }
   
-  LOG_WRN("UNPACKED %d SDUS. REMAINING FRAME SIZE %d", numSdusInFrame, remainingFrameSize);
+  LOG_DBG("UNPACKED %d SDUS. REMAINING FRAME SIZE %d", numSdusInFrame, remainingFrameSize);
   return 0;
 }
 
@@ -480,7 +497,7 @@ size_t DectPhy_PackFrame(DectPacket_t *frame, size_t frameSize)
       break;
     }
 
-    LOG_WRN("~~ PACK FRAME LOOP %d. REMAINING BYTES IN THE FRAME %d ~~" , numSdusTouched, remainingFrameSize);
+    LOG_DBG("~~ PACK FRAME LOOP %d. REMAINING BYTES IN THE FRAME %d ~~" , numSdusTouched, remainingFrameSize);
     numSdusTouched++; // TODO rm
     if (numSdusTouched == 5)
     {
@@ -526,8 +543,8 @@ size_t DectPhy_PackFrame(DectPacket_t *frame, size_t frameSize)
       // fragHeader->datagramTag = currentTxDatagramTag;
     }
 
-    LOG_WRN("DATAGRAM %d: OFFSET %d, %d BYTES PACKED", currentTxDatagramTag, currentTxDatagramOffset, sduSize);
-    LOG_WRN("FRAME: SIZE %d, #SDU %d, HEADER SIZE %d SDU SIZE %d", frameSize, numSdusTouched, overheadHeaderSize, sduSize);
+    LOG_DBG("DATAGRAM %d: OFFSET %d, %d BYTES PACKED", currentTxDatagramTag, currentTxDatagramOffset, sduSize);
+    LOG_DBG("FRAME: SIZE %d, #SDU %d, HEADER SIZE %d SDU SIZE %d", frameSize, numSdusTouched, overheadHeaderSize, sduSize);
     // memset(((uint8_t *) head + overheadHeaderSize), (uint8_t) currentTxDatagramTag, sduSize); // TEST 
     memcpy(((uint8_t *) head + overheadHeaderSize), (uint8_t *) currentTxDatagram->payload + currentTxDatagramOffset, sduSize);
     head += (overheadHeaderSize + sduSize);
@@ -558,9 +575,9 @@ size_t DectPhy_PackFrame(DectPacket_t *frame, size_t frameSize)
 
   if (numBytesPacked)
   {
-    LOG_WRN("PACKED %d GOOD BYTES, %d SDUS INTO %d BYTE FRAME", numGoodBytesPacked, numSdusTouched, frameSize);
+    LOG_DBG("PACKED %d GOOD BYTES, %d SDUS INTO %d BYTE FRAME", numGoodBytesPacked, numSdusTouched, frameSize);
     LOG_HEXDUMP_DBG(frame, frameSize, "FRAME");
-    LOG_WRN("------------");
+    LOG_DBG("------------");
     LOG_DBG("FRAME 0x%x HEAD 0x%x REMAINING %d", (uint8_t *) frame, (uint8_t *) head, remainingFrameSize);
     // DectPhy_UnpackFrameAndProcessSDUs(frame, frameSize); // TODO TESTING
   }
