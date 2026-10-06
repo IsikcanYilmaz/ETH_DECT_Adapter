@@ -23,4 +23,6 @@ target_sources(app PRIVATE
   phy_impl/phy_main.c
   phy_impl/pt.c
   phy_impl/ft.c
+  phy_impl/dynamic_pt.c
+  phy_impl/dynamic_ft.c
 )

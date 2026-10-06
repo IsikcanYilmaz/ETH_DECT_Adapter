@@ -12,6 +12,8 @@
 #include "phy_main.h"
 #include "pt.h"
 #include "ft.h"
+#include "dynamic_ft.h"
+#include "dynamic_pt.h"
 
 LOG_MODULE_REGISTER(dect_phy, LOG_LEVEL_WRN);
 
@@ -20,8 +22,6 @@ LOG_MODULE_REGISTER(dect_phy, LOG_LEVEL_WRN);
 
 extern struct k_queue ethTxQueue; // TODO JON There comes a point where we dont free these things
 extern struct k_queue ethRxQueue;
-
-K_QUEUE_DEFINE(inFlightQueue); // on transmission op completes, free these pointers
 
 extern const struct gpio_dt_spec tp23Switch; // todo put these elsewhere
 extern const struct gpio_dt_spec tp24Switch;
@@ -58,12 +58,17 @@ volatile uint64_t beaconDelta = 0; // Counted at the ends of operations
 volatile uint64_t txDelta = 0; // Counted at the ends of operations only when counter is > 1
 volatile uint64_t rxDelta = 0;
 
-DectBeaconMessage_t master_beacon;
-
 volatile enum DectPtState_e ptState = PT_STATE_IDLE;
 volatile enum DectFtState_e ftState = FT_STATE_IDLE;
 
 int mcs_max = -1;
+
+char dectScheduleItemBuffer[DECT_SCHEDULE_QUEUE_DEPTH_BYTES];
+char dectInFlightItemBuffer[DECT_IN_FLIGHT_QUEUE_DEPTH_BYTES];
+struct k_msgq dectScheduleItemQueue;
+struct k_msgq dectInFlightItemQueue;
+int dectNumInflightItem = 0; // TODO rm maybe
+int64_t dectScheduleOffset = -4000; // when our expected end times dont match the actual ones, add this to the endtick
 
 // STATISTICS
 uint32_t numSentEthFrames = 0;
@@ -108,6 +113,7 @@ uint16_t currentRxDatagramSize = 0;
 // KNOBS
 DectKnobs_t knobs = {
   .mcs = CONFIG_APP_MCS,
+  .beaconMcs = 0,
   .ops_per_beacon = DECT_OPS_PER_BEACON,
   .carrier = CONFIG_CARRIER,
 };
@@ -115,6 +121,7 @@ DectKnobs_t knobs = {
 // MCS to NUM BYTES PER SLOT. Indexed by MCS
 // MCS:                      0   1   2   3   4
 int mcsToBytesPerSlot[5] = {17, 37, 57, 77, 117};
+// NOTE : The nRF5191 doesnt support mcs above 4. So our max transferrable size is 117 * 4 = 468 B
 
 inline uint64_t us_to_modem_ticks(uint64_t us)
 {
@@ -159,6 +166,10 @@ uint64_t genericRxScheduleOffset;
 uint64_t genericRxDuration;
 uint64_t genericRelativeRxSchedule;
 
+static uint64_t lastOpStart;
+static uint64_t lastOpEnding;
+static volatile uint16_t numInFlightActions = 0;
+
 static volatile bool iAmFt;
 
 /* Header type 1, due to endianness the order is different than in the specification. */
@@ -190,19 +201,17 @@ K_SEM_DEFINE(time_sem, 0, 1);
 K_SEM_DEFINE(done_sem, 0, 1);
 K_SEM_DEFINE(resync_sem, 0, 1);
 
+// TODO Depricate
 bool DectPhy_PktIsBeacon(char *pkt)
 {
-  DectBeaconMessage_t *beac = pkt;
-  return (strncmp(beac->magic, DECT_BEACON_MAGIC_STRING, 4) == 0);
+  DectPacket_t *beac = pkt;
+  return (beac->header.isBeacon);
 }
 
 bool DectPhy_PktIsNone(char *pkt) 
 {
-  if (strncmp(pkt, "NONE", 4) == 0)
-  {
-    return true;
-  }
-  return false;
+  DectPacket_t *dectPkt = pkt;
+  return (dectPkt->header.isData == 1 && dectPkt->header.payloadSize == 0);
 }
 
 int DectPhy_ReceiveContinuous(uint32_t handle, uint32_t durationTicks, uint64_t start_time)
@@ -267,23 +276,6 @@ int DectPhy_Receive(uint32_t handle, uint32_t durationTicks, uint64_t start_time
 // TODO find a better way lol
 void DectPhy_InFlightCompleted(void)
 {
-  // TODO depricating the inflight business
-  // // Tx just completed. Free the pointer of what just got tx'd. 
-  // if (k_queue_is_empty(&inFlightQueue))
-  // {
-  //   LOG_ERR("TX COMPLETE BUT IN FLIGHT QUEUE EMPTY!!!");
-  // }
-  // else
-  // {
-  //   struct DectInFlightPktStub_s *pktToFree = k_queue_get(&inFlightQueue, K_FOREVER);
-  //   if (pktToFree)
-  //   {
-  //     if (pktToFree->ptr)
-  //       LOG_DBG("IN FLIGHT PKT FROM HANDLE %d DONE. 0x%08x. FREEING", pktToFree->handle, pktToFree->ptr);
-  //     k_free(pktToFree->ptr);
-  //     k_free(pktToFree);
-  //   }
-  // }
 }
 
 int DectPhy_Transmit(uint32_t handle, void *data, size_t data_len, uint64_t start_time)
@@ -331,14 +323,17 @@ int DectPhy_HandleSDUFragment(char *data, size_t len)
   int err = 0;
   DectPacket_t *dectPkt = (DectPacket_t *) data;
 
-  bool isDataPacket = ((dectPkt->flags & (1 << DECT_DATA_PACKET_FLAG_BIT)) > 0);
-  bool isFragmented = ((dectPkt->flags & (1 << DECT_FRAG_HEADER_EXISTS_FLAG_BIT)) > 0);
-  bool reassemblyComplete = (!isFragmented);
-  DectFragmentationHeader_t *fragHeader = (isFragmented) ? (DectFragmentationHeader_t *) (dectPkt->payload) : NULL;
-  char *sduPayload = (isFragmented) ? ((char *) dectPkt->payload) + (sizeof(DectFragmentationHeader_t)) : ((char *) dectPkt->payload);
-  size_t sduSize = dectPkt->payloadSize;
+  // bool isDataPacket = ((dectPkt->flags & (1 << DECT_DATA_PACKET_FLAG_BIT)) > 0);
+  // bool isFragmented = ((dectPkt->flags & (1 << DECT_FRAG_HEADER_EXISTS_FLAG_BIT)) > 0);
+  bool isDataPacket = dectPkt->header.isData;
+  bool isFragment = dectPkt->header.isFragment;
+  bool reassemblyComplete = (!isFragment);
+  DectFragmentationHeader_t *fragHeader = (isFragment) ? (DectFragmentationHeader_t *) (dectPkt->payload) : NULL;
+  char *sduPayload = (isFragment) ? ((char *) dectPkt->payload) + (sizeof(DectFragmentationHeader_t)) : ((char *) dectPkt->payload);
+  // size_t sduSize = dectPkt->payloadSize;
+  size_t sduSize = dectPkt->header.payloadSize;
   
-  LOG_DBG("RECEIVED SDU DATA %d B. %s %s", sduSize, (isDataPacket) ? "[DATA]":"", (isFragmented) ? "[FRAG]":"");
+  LOG_DBG("RECEIVED SDU DATA %d B. %s %s", sduSize, (isDataPacket) ? "[DATA]":"", (isFragment) ? "[FRAG]":"");
   LOG_HEXDUMP_DBG(data, len, "FUNNEL");
 
   // We just received some SDU data. now we either
@@ -356,7 +351,7 @@ int DectPhy_HandleSDUFragment(char *data, size_t len)
   // If we have nothing being reassembled or received, malloc something for it.
   if (currentRxDatagram == NULL)
   {
-    currentRxDatagramSize = (isFragmented) ? fragHeader->datagramSize : sduSize;
+    currentRxDatagramSize = (isFragment) ? fragHeader->datagramSize : sduSize;
     currentRxDatagramOffset = 0;
     currentRxDatagram = (struct LeanWiznet_Packet *) k_malloc(sizeof(struct LeanWiznet_Packet) + currentRxDatagramSize);
     if (currentRxDatagram == NULL)
@@ -364,10 +359,10 @@ int DectPhy_HandleSDUFragment(char *data, size_t len)
       LOG_ERR("%s:%d OOM", __FUNCTION__, __LINE__);
       return 1;
     }
-    LOG_DBG("%sNEW PACKET. DATAGRAM SIZE %d", (isFragmented) ? "ASSEMBLING " : "", currentRxDatagramSize);
+    LOG_DBG("%sNEW PACKET. DATAGRAM SIZE %d", (isFragment) ? "ASSEMBLING " : "", currentRxDatagramSize);
   }
 
-  if (isFragmented) 
+  if (isFragment) 
   {
     // If the SDU we got is a fragment AND we're already reassembling another packet
     // if (sduSize < sizeof(DectFragmentationHeader_t)) // Sanity check
@@ -442,16 +437,19 @@ size_t DectPhy_UnpackFrameAndProcessSDUs(DectPacket_t *frame, size_t frameSize)
   // Go through each header and SDU. If we fully reassemble a datagram, pass it to the Wiznet layer
   while(remainingFrameSize)
   {
-    if (currentSdu->flags == 0x00 || currentSdu->flags == 0xff) //  TODO decide this
+    if (* (uint16_t *) &currentSdu->header == 0x00 || * (uint16_t *) &currentSdu->header == 0xff) //  TODO decide this
     {
       LOG_DBG("0 FLAGS. DONE");
       break;
     }
-    bool isData = ((currentSdu->flags & (1 << DECT_DATA_PACKET_FLAG_BIT)) > 0);
-    bool isFragment = ((currentSdu->flags & (1 << DECT_FRAG_HEADER_EXISTS_FLAG_BIT)) > 0);
-    size_t headerPlusSduSize = sizeof(DectPacket_t) + (currentSdu->payloadSize) + ((isFragment) ? sizeof(DectFragmentationHeader_t) : 0);
+
+    // bool isData = ((currentSdu->flags & (1 << DECT_DATA_PACKET_FLAG_BIT)) > 0);
+    // bool isFragment = ((currentSdu->flags & (1 << DECT_FRAG_HEADER_EXISTS_FLAG_BIT)) > 0);
+    bool isData = currentSdu->header.isData;
+    bool isFragment = currentSdu->header.isFragment;
+    size_t headerPlusSduSize = sizeof(DectPacket_t) + (currentSdu->header.payloadSize) + ((isFragment) ? sizeof(DectFragmentationHeader_t) : 0);
     nextSdu = (uint8_t *) currentSdu + headerPlusSduSize;
-    LOG_DBG("SDU %d. FLAGS 0x%x D%d F%d, PAYLOAD SIZE %d, TOTAL SIZE %d, FRAME SIZE %d", numSdusInFrame, currentSdu->flags, isData, isFragment, currentSdu->payloadSize, currentSdu->payloadSize + 2, frameSize);
+    LOG_DBG("SDU %d. FLAGS 0x%x D%d F%d, PAYLOAD SIZE %d, TOTAL SIZE %d, FRAME SIZE %d", numSdusInFrame, * (uint8_t *) &currentSdu->header, isData, isFragment, currentSdu->header.payloadSize, currentSdu->header.payloadSize + 2, frameSize);
     LOG_DBG("SDU 0x%x - 0x%x. REMAINING %d", currentSdu, nextSdu, remainingFrameSize);
     LOG_HEXDUMP_DBG(currentSdu, headerPlusSduSize, "HEADER PLUS SDU");
 
@@ -529,14 +527,16 @@ size_t DectPhy_PackFrame(DectPacket_t *frame, size_t frameSize)
 
     // Start filling out the headers
     DectPacket_t *subframe = head;
-    subframe->flags = 0;
-    subframe->flags |= (1 << DECT_DATA_PACKET_FLAG_BIT); // TODO only do this if this is a data SDU
-    subframe->payloadSize = sduSize;
+    // subframe->flags = 0;
+    // subframe->flags |= (1 << DECT_DATA_PACKET_FLAG_BIT); // TODO only do this if this is a data SDU
+    subframe->header.isData = 1;
+    subframe->header.payloadSize = sduSize;
     
     // If this is a fragment, use up some of our real estate for the fragmentation header
     if (needsFragmenting)
     {
-      subframe->flags |= (1 << DECT_FRAG_HEADER_EXISTS_FLAG_BIT); 
+      // subframe->flags |= (1 << DECT_FRAG_HEADER_EXISTS_FLAG_BIT); 
+      subframe->header.isFragment = 1; 
       DectFragmentationHeader_t *fragHeader = (DectFragmentationHeader_t *) subframe->payload;
       fragHeader->datagramSize = currentTxDatagram->size;
       fragHeader->datagramOffset = currentTxDatagramOffset;
@@ -548,6 +548,7 @@ size_t DectPhy_PackFrame(DectPacket_t *frame, size_t frameSize)
     // memset(((uint8_t *) head + overheadHeaderSize), (uint8_t) currentTxDatagramTag, sduSize); // TEST 
     memcpy(((uint8_t *) head + overheadHeaderSize), (uint8_t *) currentTxDatagram->payload + currentTxDatagramOffset, sduSize);
     head += (overheadHeaderSize + sduSize);
+    numSentDataBytes += sduSize;
 
     // Book keep
     numBytesPacked += sduSize + overheadHeaderSize;
@@ -579,7 +580,7 @@ size_t DectPhy_PackFrame(DectPacket_t *frame, size_t frameSize)
     LOG_HEXDUMP_DBG(frame, frameSize, "FRAME");
     LOG_DBG("------------");
     LOG_DBG("FRAME 0x%x HEAD 0x%x REMAINING %d", (uint8_t *) frame, (uint8_t *) head, remainingFrameSize);
-    // DectPhy_UnpackFrameAndProcessSDUs(frame, frameSize); // TODO TESTING
+    numWastedBytes += ((uint32_t ) frameSize - (uint32_t) numBytesPacked);
   }
 
   return numBytesPacked;
@@ -609,12 +610,103 @@ int DectPhy_TransmitHeadOfQueue(uint32_t handle, uint64_t start_time)
     // We have a MTU to send. Send it off
     LOG_DBG("MTU BYTES TO SEND %d", numBytesToSend);
     err = DectPhy_Transmit(handle, frameToTx, numBytesToSend, start_time);
+    numSentBytes += numBytesToSend;
+    numSentEthFrames++;
   }
   else
   {
+    frameToTx->header.isData = 1;
+    frameToTx->header.payloadSize = 0;
     // If we dont have a loaded up outgoing datagram, send a blank. TODO bad 
     LOG_DBG("NO PKT FROM ETH. SENDING BLANK TX");
-    err = DectPhy_Transmit(handle, "NONE", 4, start_time); // TODO Change this to use the actual PDU 
+    err = DectPhy_Transmit(handle, frameToTx, sizeof(DectPacket_t), start_time); // TODO Change this to use the actual PDU 
+  }
+
+  k_free(frameToTx);
+  return err;
+}
+
+// JON TODO unify the transmit paths. the separation is due to early testing
+int DectPhy_TransmitArbitrarySize(uint32_t handle, void *data, size_t data_len, uint8_t numSlots, uint64_t start_time)
+{
+  int err;
+
+  if (numSlots == 0)
+  {
+    LOG_ERR("Num slots cannot be 0!");
+    return 1;
+  }
+
+  struct phy_ctrl_field_common header = {
+    .header_format = 0x0,
+    .packet_length_type = DECT_PACKET_LENGTH_SLOT,
+    .packet_length = (numSlots-1),
+    .short_network_id = (CONFIG_APP_NETWORK_ID & 0xff),
+    .transmitter_id_hi = (device_id >> 8),
+    .transmitter_id_lo = (device_id & 0xff),
+    .transmit_power = CONFIG_APP_TX_POWER,
+    .reserved = 0,
+    .df_mcs = knobs.mcs,
+  };
+
+  struct nrf_modem_dect_phy_tx_params tx_op_params = {
+    .start_time = start_time,
+    .handle = handle,
+    .network_id = CONFIG_APP_NETWORK_ID,
+    .phy_type = 0,
+    .lbt_rssi_threshold_max = 0,
+    .carrier = knobs.carrier,
+    .lbt_period = 0,
+    .phy_header = (union nrf_modem_dect_phy_hdr *) &header,
+    .data = data,
+    .data_size = data_len,
+  };
+
+  LOG_DBG("Transmitting %d bytes", data_len);
+
+  err = nrf_modem_dect_phy_tx(&tx_op_params);
+	if (err != 0) {
+		return err;
+	}
+
+	return 0;
+}
+
+int DectPhy_TransmitHeadOfQueueArbitrarySize(uint32_t handle, uint8_t numSlots, uint64_t start_time) 
+{
+  int err;
+  // If we have an outgoing datagram loaded up, keep sending it. 
+  size_t effectivePayloadSize;
+  size_t txSizePerMcs = numSlots * mcsToBytesPerSlot[knobs.mcs];
+  DectPacket_t *frameToTx = k_malloc(txSizePerMcs); 
+
+  // memset(frameToTx, 0xff, txSizePerMcs); // TEST TODO make sure this is not needed. This is here so that we know when a frame no longer has data
+
+  size_t numBytesToSend = DectPhy_PackFrame(frameToTx, txSizePerMcs);
+
+  // TODO Handle OOM. PackFrame() now handles the loading and unloading of currentTxDatagram
+  if (frameToTx == NULL) // JON TODO Here if an OOM happens we shoot a blank and drop the whole datagram. there's
+  {
+    LOG_ERR("%s:%d OOM", __FUNCTION__, __LINE__);
+    return 1;
+  }
+
+  if (numBytesToSend)
+  {
+    // We have a MTU to send. Send it off
+    LOG_DBG("MTU BYTES TO SEND %d", numBytesToSend);
+    err = DectPhy_TransmitArbitrarySize(handle, frameToTx, numBytesToSend, numSlots, start_time);
+    numSentBytes += numBytesToSend;
+    numSentEthFrames++;
+  }
+  else
+  {
+    * (uint16_t *) &frameToTx->header = 0x00;
+    frameToTx->header.isData = 1;
+    frameToTx->header.payloadSize = 0;
+    // If we dont have a loaded up outgoing datagram, send a blank. TODO bad 
+    LOG_DBG("NO PKT FROM ETH. SENDING BLANK TX");
+    err = DectPhy_Transmit(handle, frameToTx, sizeof(DectPacket_t), start_time); // TODO Change this to use the actual PDU 
   }
 
   k_free(frameToTx);
@@ -625,25 +717,16 @@ int DectPhy_TransmitBeacon(uint64_t start_time)
 {
   int err; 
   // TODO more in depth logic
-  master_beacon.this_beacon_time = start_time;
-  uint32_t expected_next_beacon_offset = (beaconDelta) ? (uint32_t) beaconDelta : (uint32_t) ((2*knobs.ops_per_beacon) * (DECT_SLOT_DURATION_TICK + DECT_HEADROOM + opTransitionLatency)); // TODO bad solution but will do. basically we're just sending the delta in ticks, between this xmit and the previous one. it worked
-  master_beacon.modem_ticks_until_next_beacon = expected_next_beacon_offset; // TODO the very first beacon does not have a correct number of $modem_ticks_until_next_beacon. as a result the pt can only latch 2 beacon later. not a showstopper but we should fix this
+  // uint32_t expected_next_beacon_offset = (beaconDelta) ? (uint32_t) beaconDelta : (uint32_t) ((2*knobs.ops_per_beacon) * (DECT_SLOT_DURATION_TICK + DECT_HEADROOM + opTransitionLatency)); // TODO bad solution but will do. basically we're just sending the delta in ticks, between this xmit and the previous one. it worked
+ 
+  // Construct our beacon message // TODO maybe do all these outside, one and done?
+  char masterBeaconBuffer[sizeof(DectPacket_t) + sizeof(DectBeaconMessage_t)];
+  memset(masterBeaconBuffer, 0x00, sizeof(masterBeaconBuffer)); // TODO unnecessary
+  DectPacket_t *masterBeaconPacket = (DectPacket_t *) masterBeaconBuffer;
+  *masterBeaconPacket = (DectPacket_t) {.header.isData = 0, .header.isBeacon = 1, .header.isFragment = 0, .header.payloadSize = sizeof(DectPacket_t) + sizeof(DectBeaconMessage_t)};
+  DectBeaconMessage_t *masterBeacon = masterBeaconPacket->payload;
 
-  // TODO TESTING
-  // static bool first = false;
-  // if (!first)
-  // {
-  //   if (master_beacon.modem_ticks_until_next_beacon == 0)
-  //   {
-  //     LOG_ERR("BEACON Tix until next is 0. Making assumptions... ops per beacon %d", knobs.ops_per_beacon);
-  //     LOG_ERR("Assuming %llu ticks", (uint32_t) ((2*knobs.ops_per_beacon + 1) * (DECT_SLOT_DURATION_TICK + DECT_HEADROOM + opTransitionLatency)));
-  //   }
-  //   else
-  //   {
-  //     LOG_ERR("FIRST tix until next %d, beacondelta %llu", master_beacon.modem_ticks_until_next_beacon, beaconDelta);
-  //     first = true;
-  //   }
-  // }
+  masterBeacon->ops_per_beacon = knobs.ops_per_beacon;
 
   // TODO make these generic, reuse
   struct phy_ctrl_field_common header = {
@@ -655,7 +738,7 @@ int DectPhy_TransmitBeacon(uint64_t start_time)
     .transmitter_id_lo = (device_id & 0xff),
     .transmit_power = CONFIG_APP_TX_POWER,
     .reserved = 0,
-    .df_mcs = knobs.mcs,
+    .df_mcs = knobs.beaconMcs, 
   };
 
   struct nrf_modem_dect_phy_tx_params beacon_op_params = {
@@ -665,10 +748,10 @@ int DectPhy_TransmitBeacon(uint64_t start_time)
     .phy_type = 0,
     .lbt_rssi_threshold_max = 0,
     .carrier = knobs.carrier,
-    .lbt_period = 0,// NRF_MODEM_DECT_LBT_PERIOD_MAX, // JON EXPERIMENTAL
+    .lbt_period = 0,
     .phy_header = (union nrf_modem_dect_phy_hdr *) &header,
-    .data = &master_beacon,
-    .data_size = sizeof(DectBeaconMessage_t),
+    .data = masterBeaconBuffer,
+    .data_size = sizeof(DectPacket_t) + sizeof(DectBeaconMessage_t),
   };
 
   err = nrf_modem_dect_phy_tx(&beacon_op_params);
@@ -773,6 +856,7 @@ static void on_latency_info_get(const struct nrf_modem_dect_phy_latency_info_eve
     LOG_WRN("Latency info: \n\
             slot_ticks:              %llu\n\
             headroom_ticks:          %llu\n\
+            block_ticks:             %llu\n\
             scheduled_op_transition: %d\n\
             op_startup:              %d\n\
             tx_idleToActiveLatency:  %d\n\
@@ -785,6 +869,7 @@ static void on_latency_info_get(const struct nrf_modem_dect_phy_latency_info_eve
             host ticks per ms:       %llu\n", 
             (uint64_t) DECT_SLOT_DURATION_TICK, 
             (uint64_t) DECT_HEADROOM, 
+            (uint64_t) DECT_BLOCK_TICKS,
             opTransitionLatency, opStartupLatency, tx_idleToActiveLatency, tx_activeToIdleLatency, rx_idleToActiveLatency, rx_activeToIdleLatency,
             modem_time, k_uptime_ticks(), (uint64_t)(NRF_MODEM_DECT_MODEM_TIME_TICK_RATE_KHZ), (uint64_t) (CONFIG_SYS_CLOCK_TICKS_PER_SEC / 1000));
   }
@@ -805,47 +890,36 @@ static void dect_phy_event_handler(const struct nrf_modem_dect_phy_event *evt)
 	case NRF_MODEM_DECT_PHY_EVT_INIT:
 		on_init(&evt->init);
 		break;
-	case NRF_MODEM_DECT_PHY_EVT_DEINIT:
-		// on_deinit(&evt->deinit);
-		break;
 	case NRF_MODEM_DECT_PHY_EVT_ACTIVATE:
 		on_activate(&evt->activate);
-		break;
-	case NRF_MODEM_DECT_PHY_EVT_DEACTIVATE:
-		// on_deactivate(&evt->deactivate);
 		break;
 	case NRF_MODEM_DECT_PHY_EVT_CONFIGURE:
 		on_configure(&evt->configure);
 		break;
-	case NRF_MODEM_DECT_PHY_EVT_RADIO_CONFIG:
-		// on_radio_config(&evt->radio_config);
-		break;
 	case NRF_MODEM_DECT_PHY_EVT_COMPLETED:
+    numInFlightActions--;
     if (iAmFt)
     {
-      Ft_HandleEvent(evt);
+      DynamicFt_HandleEvent(evt);
     }
     else
     {
-      Pt_HandleEvent(evt);
+      DynamicPt_HandleEvent(evt);
     }
 		break;
 	case NRF_MODEM_DECT_PHY_EVT_CANCELED:
 		on_cancel(&evt->cancel);
 		break;
-	case NRF_MODEM_DECT_PHY_EVT_RSSI:
-		// on_rssi(&evt->rssi);
-		break;
 	case NRF_MODEM_DECT_PHY_EVT_PCC:
-		// on_pcc(&evt->pcc);
     lastPccModemTick = modem_time;
+    numInFlightActions--;
     if (iAmFt)
     {
-      Ft_HandleEvent(evt);
+      DynamicFt_HandleEvent(evt);
     }
     else
     {
-      Pt_HandleEvent(evt);
+      DynamicPt_HandleEvent(evt);
     }
 		break;
 	case NRF_MODEM_DECT_PHY_EVT_PCC_ERROR:
@@ -856,11 +930,12 @@ static void dect_phy_event_handler(const struct nrf_modem_dect_phy_event *evt)
     pccPdcDiff = lastPdcModemTick - lastPccModemTick;
     if (iAmFt)
     {
-      Ft_HandleEvent(evt);
+      // Ft_HandleEvent(evt);
+      DynamicFt_HandleEvent(evt);
     }
     else 
     {
-      Pt_HandleEvent(evt);
+      DynamicPt_HandleEvent(evt);
     }
 		break;
 	case NRF_MODEM_DECT_PHY_EVT_PDC_ERROR:
@@ -869,30 +944,18 @@ static void dect_phy_event_handler(const struct nrf_modem_dect_phy_event *evt)
 	case NRF_MODEM_DECT_PHY_EVT_TIME:
     if (iAmFt)
     {
-      Ft_HandleEvent(evt);
+      DynamicFt_HandleEvent(evt);
     }
     else 
     {
-      Pt_HandleEvent(evt);
+      DynamicPt_HandleEvent(evt);
     }
 		break;
 	case NRF_MODEM_DECT_PHY_EVT_CAPABILITY:
 		on_capability_get(&evt->capability_get);
 		break;
-	case NRF_MODEM_DECT_PHY_EVT_BANDS:
-		// on_bands_get(&evt->band_get);
-		break;
 	case NRF_MODEM_DECT_PHY_EVT_LATENCY:
 		on_latency_info_get(&evt->latency_get);
-		break;
-	case NRF_MODEM_DECT_PHY_EVT_LINK_CONFIG:
-		// on_link_config(&evt->link_config);
-		break;
-	case NRF_MODEM_DECT_PHY_EVT_STF_CONFIG:
-		// on_stf_cover_seq_control(&evt->stf_cover_seq_control);
-		break;
-	case NRF_MODEM_DECT_PHY_EVT_TEST_RF_TX_CW_CONTROL_CONFIG:
-		// on_test_rf_tx_cw_ctrl(&evt->test_rf_tx_cw_control);
 		break;
 	}
 }
@@ -977,7 +1040,7 @@ static int cmd_bridge(const struct shell *shell, size_t argc, char **argv)
     shell_print(shell, "Dect Bridge status:");
     shell_print(shell, "I am : %s", (iAmFt) ? "FT" : "PT");
     shell_print(shell, "State: %d", (iAmFt) ? ftState : ptState);
-    shell_print(shell, "Knobs: Mcs: %d, carrier: %d, ops: %d", knobs.mcs, knobs.carrier, knobs.ops_per_beacon);
+    shell_print(shell, "Knobs: Mcs: %d BMcs: %d, carrier: %d, ops: %d", knobs.mcs, knobs.beaconMcs, knobs.carrier, knobs.ops_per_beacon);
     DectPhy_PrintStatistics(shell);
     return 0;
   }
@@ -1013,24 +1076,82 @@ static int cmd_bridge(const struct shell *shell, size_t argc, char **argv)
 
 SHELL_CMD_ARG_REGISTER(bridge, NULL, "bridge <subcommand>", cmd_bridge, 1, 32);
 
+#define DECT_MAX_IN_FLIGHT_ACTIONS (2) // TODO header file
+struct k_thread schedulerThreadHandle;
+K_KERNEL_STACK_MEMBER(schedulerThreadStack, 1024); // TODO move these up
+static void DectPhy_SchedulerThread(void *p1, void *p2, void *p3)
+{
+  DectScheduleItem_t item;
+  while(true)
+  {
+    k_msgq_get(&dectScheduleItemQueue, &item, K_FOREVER);
+    while(numInFlightActions >= DECT_MAX_IN_FLIGHT_ACTIONS)
+    {
+      // k_yield();
+      k_sleep(K_USEC(10));
+    }
+
+    if (item.followedByLast)
+    {
+      item.startTime = lastOpEnding + opTransitionLatency;
+      item.expectedEndTime = item.startTime + (item.numSlots * DECT_SLOT_DURATION_TICK) + dectScheduleOffset + ((item.action < DECT_ACTION_RX) ? tx_activeToIdleLatency : rx_activeToIdleLatency);
+    }
+
+    if (item.numSlots > 4 && item.action == DECT_ACTION_DATA_TX)
+    {
+      LOG_ERR("nRF DOESNT SUPPORT numSlots %d > 4. GO AT YOUR OWN RISK", item.numSlots);
+    }
+    
+    LOG_DBG("TO BE SCHEDULED: %d ACTION, @ %llu, EXPECTED TO END AT %llu, NUM SLOTS %d, HANDLE %d", item.action, item.startTime, item.expectedEndTime, item.numSlots, item.handle);
+
+    switch(item.action)
+    {
+      case DECT_ACTION_BEACON_TX:
+        {
+          DectPhy_TransmitBeacon(item.startTime);
+          break;
+        }
+      case DECT_ACTION_DATA_TX:
+        {
+          DectPhy_TransmitHeadOfQueueArbitrarySize(item.handle, item.numSlots, item.startTime);
+          break;
+        }
+      case DECT_ACTION_DATA_RX:
+        {
+          DectPhy_Receive(item.handle, item.numSlots * DECT_SLOT_DURATION_TICK, item.startTime);
+          break;
+        }
+      default:
+        break;
+    }
+
+    numInFlightActions++;
+
+    lastOpStart = item.startTime;
+    lastOpEnding = item.expectedEndTime;
+
+    // k_msgq_put(&dectInFlightItemQueue, &item, K_NO_WAIT);
+  }
+}
+
 void DectPhy_Main(bool master)
 {	
   set_all_tps(0);
 
+  k_msgq_init(&dectScheduleItemQueue, dectScheduleItemBuffer, sizeof(DectScheduleItem_t), DECT_SCHEDULE_QUEUE_NUM_ITEMS);
+  k_msgq_init(&dectInFlightItemQueue, dectInFlightItemBuffer, sizeof(DectScheduleItem_t), DECT_IN_FLIGHT_QUEUE_NUM_ITEMS); // TODO this may not be needed after all
+  k_thread_create(&schedulerThreadHandle, schedulerThreadStack, 1024, DectPhy_SchedulerThread, NULL, NULL, NULL, K_PRIO_PREEMPT(7), 0, K_NO_WAIT);
   DectPhy_Init();
   int err;
   iAmFt = master;
 
-  sprintf(master_beacon.magic, "BEAC"); 
-  master_beacon.ops_per_beacon = knobs.ops_per_beacon;
-
   if (iAmFt) // TODO currently these dont do anythying
   {
-    Ft_Init();
+    DynamicFt_Init();
   }
   else
   {
-    Pt_Init();
+    DynamicPt_Init();
   }
 
   nrf_modem_dect_phy_time_get(); 
@@ -1038,11 +1159,11 @@ void DectPhy_Main(bool master)
 
   if (iAmFt)
   {
-    Ft_InfiniteLoop();
+    DynamicFt_InfiniteLoop();
   }
   else
   {
-    Pt_InfiniteLoop();
+    DynamicPt_InfiniteLoop();
   }
 }
 

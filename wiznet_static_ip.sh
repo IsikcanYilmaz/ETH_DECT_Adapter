@@ -3,8 +3,8 @@
 IP1="111.222.111.2"
 IP2="111.222.111.3"
 
-IP1="10.42.0.1"
-IP2="10.42.0.50"
+IP1="10.42.0.10"
+IP2="10.42.0.20"
 ROVER_IP="10.42.0.50"
 
 GATEWAY="111.222.111.1"
@@ -65,6 +65,6 @@ sudo ip address flush dev $IFACENAME
 sudo ip route flush dev $IFACENAME
 sudo ip address add "$LOCAL_IP"/24 dev $IFACENAME
 sudo ip route add "$REMOTE_IP" dev $IFACENAME
-sudo ip neigh add "$REMOTE_IP" lladdr "$REMOTE_MAC" dev "$IFACENAME"
-echo sudo ip neigh add "$REMOTE_IP" lladdr "$REMOTE_MAC" dev "$IFACENAME"
+# sudo ip neigh add "$REMOTE_IP" lladdr "$REMOTE_MAC" dev "$IFACENAME"
+# echo sudo ip neigh add "$REMOTE_IP" lladdr "$REMOTE_MAC" dev "$IFACENAME"
 

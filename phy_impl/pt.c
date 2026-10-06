@@ -56,12 +56,12 @@ static void mock_pdc(const struct nrf_modem_dect_phy_pdc_event *evt) // TODO mak
       slotCounter = numSlotsInFrame;
 
       uint64_t dlRxDuration = DECT_SLOT_DURATION_TICK + DECT_HEADROOM;
-      uint64_t dlRxStart = next_beacon_tick + DECT_SLOT_DURATION_TICK + DECT_HEADROOM + opTransitionLatency;
+      uint64_t dlRxStart = next_beacon_tick + DECT_SLOT_DURATION_TICK + DECT_HALF_HEADROOM + opTransitionLatency;
       uint64_t ulTxStart = dlRxStart + DECT_SLOT_DURATION_TICK + DECT_HEADROOM + opTransitionLatency + (DECT_HALF_HEADROOM);
 
-      err = DectPhy_Receive(BEACON_LATCH_RX_HANDLE, dlRxDuration, next_beacon_tick); // SUCCESSFULLY RECEIVES
-      err = DectPhy_Receive(PT_RX_HANDLE + slotCounter, dlRxDuration, dlRxStart); // SUCCESSFULLY RECEIVES 
-      err = DectPhy_TransmitHeadOfQueue(PT_TX_HANDLE + slotCounter, ulTxStart); // SUCCESSFULLY TRANSMITS
+      err = DectPhy_Receive(BEACON_LATCH_RX_HANDLE, dlRxDuration, next_beacon_tick); // First Latch Beacon
+      err = DectPhy_Receive(PT_RX_HANDLE + slotCounter, dlRxDuration, dlRxStart); // First Rx
+      err = DectPhy_TransmitHeadOfQueue(PT_TX_HANDLE + slotCounter, ulTxStart); // First Tx
       
       if (err)
       {
@@ -96,7 +96,7 @@ static void mock_pdc(const struct nrf_modem_dect_phy_pdc_event *evt) // TODO mak
   {
     if (DectPhy_PktIsBeacon(evt->data))
     {
-      LOG_DBG("LATCH BEACON RECEIVED @ %llu", modem_time);
+      LOG_WRN("LATCH BEACON RECEIVED @ %llu", modem_time);
       latch_beacon_time = modem_time;
       ptState = PT_STATE_SCHEDULED_DOWNLINK;
       // ptState = PT_STATE_TEST;
@@ -155,12 +155,12 @@ static void mock_pdc(const struct nrf_modem_dect_phy_pdc_event *evt) // TODO mak
       //                  nextRx   nextTx
 
       uint64_t next_beacon_tick = modem_time + opTransitionLatency + dlRxDuration + opTransitionLatency; 
-      uint64_t nextRx = next_beacon_tick + dlRxDuration + opTransitionLatency + (DECT_HEADROOM);
+      uint64_t nextRx = next_beacon_tick + dlRxDuration + opTransitionLatency + (DECT_HALF_HEADROOM);
       uint64_t nextTx = nextRx + dlRxDuration + opTransitionLatency + (DECT_HALF_HEADROOM);
 
-      err = DectPhy_Receive(BEACON_LATCH_RX_HANDLE, dlRxDuration, next_beacon_tick); // SUCCESSFULLY RECEIVES
-      err = DectPhy_Receive(PT_RX_HANDLE + slotCounter, dlRxDuration, nextRx);
-      err = DectPhy_TransmitHeadOfQueue(PT_TX_HANDLE + slotCounter, nextTx);
+      err = DectPhy_Receive(BEACON_LATCH_RX_HANDLE, dlRxDuration, next_beacon_tick); // After the first Latch 
+      err = DectPhy_Receive(PT_RX_HANDLE + slotCounter, dlRxDuration, nextRx); //
+      err = DectPhy_TransmitHeadOfQueue(PT_TX_HANDLE + slotCounter, nextTx); //
 
       LOG_DBG("EXPECTING LATCH @ %llu DL @ %llu UL @ %llu", next_beacon_tick, nextRx, nextTx);
 
@@ -207,7 +207,7 @@ static void mock_complete(const struct nrf_modem_dect_phy_op_complete_event *evt
   // }
   if (evt->handle == BEACON_RX_HANDLE && ptState == PT_STATE_WAIT_FOR_BEACON)
   {
-    LOG_ERR("WAIT FOR BEACON TIMED OUT");
+    LOG_DBG("WAIT FOR BEACON TIMED OUT");
   }
 
   if (evt->handle == BEACON_LATCH_RX_HANDLE && ptState == PT_STATE_WAIT_FOR_LATCH_BEACON) // WE MISSED THE LATCH BEACON! //////////////

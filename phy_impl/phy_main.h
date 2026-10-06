@@ -20,15 +20,54 @@
 #define DECT_SLOT_DURATION_TICK (28800)
 #define DECT_HALF_SLOT_DURATION_TICK (14400)
 
-#define DECT_HEADROOM (US_TO_MODEM_TICKS(300)) // 300 us
+#define DECT_HEADROOM (US_TO_MODEM_TICKS(500))
 #define DECT_HALF_HEADROOM (DECT_HEADROOM/2) 
 #define DECT_QUART_HEADROOM (DECT_HEADROOM/4)
 
+#define DECT_BLOCK_TICKS (DECT_SLOT_DURATION_TICK + DECT_HEADROOM)
+#define DECT_HALF_BLOCK_TICKS (DECT_BLOCK_TICKS / 2)
+#define DECT_QUART_BLOCK_TICKS (DECT_BLOCK_TICKS / 4)
+
 // #define DECT_OPS_PER_BEACON 8 //164
-#define DECT_OPS_PER_BEACON (DECT_SLOTS_PER_FRAME * 5) //164 // working
+#define DECT_OPS_PER_BEACON (DECT_SLOTS_PER_FRAME) //164 // working
 
 // #define DECT_MASTER_BEACON_PERIOD_TICK (10 * 24 * DECT_SLOT_DURATION_TICK) //(30 * 24 * DECT_SLOT_DURATION_TICK)
 #define DECT_MASTER_BEACON_PERIOD_TICK (20 * 24 * DECT_SLOT_DURATION_TICK) // working
+
+typedef enum 
+{
+  DECT_ACTION_TX,
+  DECT_ACTION_BEACON_TX,
+  DECT_ACTION_DATA_TX,
+
+  DECT_ACTION_RX,
+  DECT_ACTION_BEACON_RX,
+  DECT_ACTION_DATA_RX,
+
+  DECT_ACTION_FLUSH,
+  DECT_ACTION_ACTION_END
+} DectActionType_e;
+
+typedef struct 
+{
+  DectActionType_e action;
+  uint32_t handle;
+  uint8_t numSlots;
+  uint64_t headroom;
+  uint64_t startTime;
+  uint64_t expectedEndTime;
+  uint32_t rxDuration; // only for rx // TODO may not be needed
+  bool followedByLast;
+} DectScheduleItem_t; // 18 bytes
+
+extern struct k_msgq dectScheduleItemQueue;
+extern struct k_msgq dectInFlightItemQueue;
+extern int64_t dectScheduleOffset;
+
+#define DECT_SCHEDULE_QUEUE_NUM_ITEMS (256)
+#define DECT_SCHEDULE_QUEUE_DEPTH_BYTES (sizeof(DectScheduleItem_t) * DECT_SCHEDULE_QUEUE_NUM_ITEMS)
+#define DECT_IN_FLIGHT_QUEUE_NUM_ITEMS (8)
+#define DECT_IN_FLIGHT_QUEUE_DEPTH_BYTES (sizeof(DectScheduleItem_t) * DECT_IN_FLIGHT_QUEUE_NUM_ITEMS)
 
 #define IS_RX_HANDLE(x) (x == BEACON_RX_HANDLE || (x >= FT_RX_HANDLE && x < PT_TX_HANDLE) || (x >= PT_RX_HANDLE && x < TX_COMBO_HANDLE) || (x >= RX_COMBO_HANDLE && x < TEST_TX_HANDLE))
 #define IS_TX_HANDLE(x) (x == BEACON_TX_HANDLE || (x >= FT_TX_HANDLE && x < FT_RX_HANDLE) || (x >= PT_TX_HANDLE && x < PT_RX_HANDLE) || (x >= TX_COMBO_HANDLE && x < RX_COMBO_HANDLE))
@@ -41,13 +80,19 @@
 #define DECT_MESSAGE_END_BYTE (0xff) // TODO this may or may not be needed, but when we pack in SDUs and there is still remaining free bytes, make the first free byte 0xff so that when we're unpacking we know to stop there
 
 // This is the frame structure that we encapsulate every piece of data we send over DECT with
-#define DECT_DATA_PACKET_FLAG_BIT 0
-#define DECT_BEACON_FLAG_BIT 1
-#define DECT_FRAG_HEADER_EXISTS_FLAG_BIT 2
+#define DECT_DATA_PACKET_FLAG_BIT 0 // JON Depricate. Use the union below
+#define DECT_BEACON_FLAG_BIT 1 // JON Depricate
+#define DECT_FRAG_HEADER_EXISTS_FLAG_BIT 2 // JON Depricate
+
 typedef struct DectPacket_s
 {
-  uint8_t flags;
-  uint8_t payloadSize; // This includes every header + payload data EXCEPT this header. so the size of the payload char array below
+  struct {
+    unsigned isData : 1;
+    unsigned isBeacon : 1;
+    unsigned isFragment : 1;
+    unsigned reserved : 4;
+    unsigned payloadSize : 9;  // max 511, above what the nRF supports
+  } __attribute__((packed)) header; // 2 bytes
   char payload[];
 } __attribute__((packed)) DectPacket_t;
 
@@ -63,18 +108,54 @@ typedef struct DectFragmentationHeader_s // Following loosely the rfc4944 https:
 
 typedef struct DectBeaconMessage_s
 {
-  char magic[4]; // 4
   uint16_t ops_per_beacon; // 2 // TODO either this or ticks until next should go
   uint64_t this_beacon_time; // 8
   uint32_t modem_ticks_until_next_beacon; // 4 // NOTE since 32bit, it supports 62.13 seconds max
                                           // tbh the pt could infer this by itself also but idk
-} __attribute__((packed)) DectBeaconMessage_t;
+  uint8_t numDownlinkSlots;
+  uint8_t numUplinkSlots;
+} __attribute__((packed)) DectBeaconMessage_t; // TODO Depricate
+
+// BEACON IE AND STRUCTS ///////////////////////////
+// The below beacon message structure mimics the Cluster Beacon with hints of the ResourcE Allocation IE. It handles time synchronization
+// The resource alloc part assumes allocation type for both uplink and downlink. 
+typedef enum 
+{
+  DECT_CLUSTER_PERIOD_10MS, // Every frame
+  DECT_CLUSTER_PERIOD_50MS, // Every 5 frames
+  DECT_CLUSTER_PERIOD_100MS, // Every 10 frames etc. etc.
+  DECT_CLUSTER_PERIOD_500MS,
+  DECT_CLUSTER_PERIOD_1000MS,
+  DECT_CLUSTER_PERIOD_1500MS,
+  DECT_CLUSTER_PERIOD_2000MS,
+  DECT_CLUSTER_PERIOD_4000MS,
+  DECT_CLUSTER_PERIOD_8000MS,
+  DECT_CLUSTER_PERIOD_16000MS,
+  DECT_CLUSTER_PERIOD_32000MS,
+  DECT_CLUSTER_PERIOD_MAX,
+} DectClusterBeaconPeriod_e;
+
+typedef struct 
+{
+  uint8_t systemFrameNumber;
+  struct {
+    unsigned networkBeaconPeriod : 4; // TODO Currently unused since we dont have network beacons
+    unsigned clusterBeaconPeriod : 4; 
+  } __attribute__ ((packed)) period;
+  struct {
+    unsigned downlink : 4;
+    unsigned uplink : 4;
+  } __attribute__ ((packed)) resourceAlloc;
+
+} __attribute__((packed)) DectClusterBeaconMessage_t; // TODO eventually depricate the old DectBeaconMessage_t 
 
 typedef struct DectKnobs_s
 {
   uint32_t mcs;
+  uint32_t beaconMcs;
   uint16_t ops_per_beacon;
   uint16_t carrier;
+  DectClusterBeaconPeriod_e beaconPeriod;
 } DectKnobs_t;
 
 enum DectPtState_e
@@ -205,6 +286,7 @@ int DectPhy_Transmit(uint32_t handle, void *data, size_t data_len, uint64_t star
 int DectPhy_Receive(uint32_t handle, uint32_t durationTicks, uint64_t start_time);
 int DectPhy_ReceiveContinuous(uint32_t handle, uint32_t durationTicks, uint64_t start_time); 
 int DectPhy_TransmitHeadOfQueue(uint32_t handle, uint64_t start_time);
+int DectPhy_TransmitHeadOfQueueArbitrarySize(uint32_t handle, uint8_t numSlots, uint64_t start_time);
 int DectPhy_TransmitBeacon(uint64_t start_time);
 int DectPhy_HandleIncomingPacketFragment(char *data, size_t len);
 size_t DectPhy_UnpackFrameAndProcessSDUs(DectPacket_t *frame, size_t frameSize);
