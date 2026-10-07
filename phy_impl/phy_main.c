@@ -272,8 +272,8 @@ int DectPhy_Receive(uint32_t handle, uint32_t durationTicks, uint64_t start_time
 	return 0;
 }
 
+// DEPRICATED
 // Upon Tx Complete, call this to mark the top of our inFlightQueue as complete. This MUST be done! 
-// TODO find a better way lol
 void DectPhy_InFlightCompleted(void)
 {
 }
@@ -465,15 +465,35 @@ size_t DectPhy_UnpackFrameAndProcessSDUs(DectPacket_t *frame, size_t frameSize)
   return 0;
 }
 
-size_t DectPhy_PackFrame(DectPacket_t *frame, size_t frameSize)
+static size_t DectPhy_PackMTU(DectPacket_t *frame, size_t frameSize, bool beacon)
 {
   char *head = (char *) frame;
-  char *tail = (char *) frame;
   size_t remainingFrameSize = frameSize;
   size_t numBytesPacked = 0;
   size_t numGoodBytesPacked = 0;
 
   int numSdusTouched = 0; // Bytes from this many SDUs are in this frame
+
+  if (beacon) 
+  {
+    DectPacket_t *subframe = (DectPacket_t *) head;
+    subframe->header.isBeacon = 1;
+    subframe->header.isData = 0;
+    subframe->header.isFragment = 0;
+    subframe->header.payloadSize = sizeof(DectClusterBeaconMessage_t);
+
+    DectClusterBeaconMessage_t *beac = (DectClusterBeaconMessage_t *) subframe->payload;
+    beac->systemFrameNumber = 0x31;
+    beac->period.clusterBeaconPeriod = DECT_CLUSTER_PERIOD_10MS;
+    beac->period.networkBeaconPeriod = 0;
+    beac->resourceAlloc.downlink = 4;
+    beac->resourceAlloc.uplink = 4;
+    numBytesPacked = sizeof(DectPacket_t) + sizeof(DectClusterBeaconMessage_t);
+    head += numBytesPacked;
+    remainingFrameSize -= numBytesPacked;
+
+    LOG_DBG("PACKING BEACON. DECT HEADER 0x%02x . PL SIZE %d. CLUSTER HEADER", * (uint16_t *) &subframe->header, subframe->header.payloadSize);
+  }
   
   while (remainingFrameSize > sizeof(DectPacket_t))
   {
@@ -545,7 +565,6 @@ size_t DectPhy_PackFrame(DectPacket_t *frame, size_t frameSize)
 
     LOG_DBG("DATAGRAM %d: OFFSET %d, %d BYTES PACKED", currentTxDatagramTag, currentTxDatagramOffset, sduSize);
     LOG_DBG("FRAME: SIZE %d, #SDU %d, HEADER SIZE %d SDU SIZE %d", frameSize, numSdusTouched, overheadHeaderSize, sduSize);
-    // memset(((uint8_t *) head + overheadHeaderSize), (uint8_t) currentTxDatagramTag, sduSize); // TEST 
     memcpy(((uint8_t *) head + overheadHeaderSize), (uint8_t *) currentTxDatagram->payload + currentTxDatagramOffset, sduSize);
     head += (overheadHeaderSize + sduSize);
     numSentDataBytes += sduSize;
@@ -586,48 +605,14 @@ size_t DectPhy_PackFrame(DectPacket_t *frame, size_t frameSize)
   return numBytesPacked;
 }
 
+// DEPRICATED
 int DectPhy_TransmitHeadOfQueue(uint32_t handle, uint64_t start_time)
 {
-  int err;
-  // If we have an outgoing datagram loaded up, keep sending it. 
-  size_t effectivePayloadSize;
-  size_t txSizePerMcs = mcsToBytesPerSlot[knobs.mcs];
-  DectPacket_t *frameToTx = k_malloc(txSizePerMcs); 
-
-  // memset(frameToTx, 0xff, txSizePerMcs); // TEST TODO make sure this is not needed. This is here so that we know when a frame no longer has data
-
-  size_t numBytesToSend = DectPhy_PackFrame(frameToTx, txSizePerMcs);
-
-  // TODO Handle OOM. PackFrame() now handles the loading and unloading of currentTxDatagram
-  if (frameToTx == NULL) // JON TODO Here if an OOM happens we shoot a blank and drop the whole datagram. there's
-  {
-    LOG_ERR("%s:%d OOM", __FUNCTION__, __LINE__);
-    return 1;
-  }
-
-  if (numBytesToSend)
-  {
-    // We have a MTU to send. Send it off
-    LOG_DBG("MTU BYTES TO SEND %d", numBytesToSend);
-    err = DectPhy_Transmit(handle, frameToTx, numBytesToSend, start_time);
-    numSentBytes += numBytesToSend;
-    numSentEthFrames++;
-  }
-  else
-  {
-    frameToTx->header.isData = 1;
-    frameToTx->header.payloadSize = 0;
-    // If we dont have a loaded up outgoing datagram, send a blank. TODO bad 
-    LOG_DBG("NO PKT FROM ETH. SENDING BLANK TX");
-    err = DectPhy_Transmit(handle, frameToTx, sizeof(DectPacket_t), start_time); // TODO Change this to use the actual PDU 
-  }
-
-  k_free(frameToTx);
-  return err;
+  return 1;
 }
 
 // JON TODO unify the transmit paths. the separation is due to early testing
-int DectPhy_TransmitArbitrarySize(uint32_t handle, void *data, size_t data_len, uint8_t numSlots, uint64_t start_time)
+int DectPhy_TransmitArbitrarySize(uint32_t handle, void *data, size_t data_len, uint8_t numSlots, uint64_t startTime)
 {
   int err;
 
@@ -650,7 +635,7 @@ int DectPhy_TransmitArbitrarySize(uint32_t handle, void *data, size_t data_len, 
   };
 
   struct nrf_modem_dect_phy_tx_params tx_op_params = {
-    .start_time = start_time,
+    .start_time = startTime,
     .handle = handle,
     .network_id = CONFIG_APP_NETWORK_ID,
     .phy_type = 0,
@@ -672,19 +657,19 @@ int DectPhy_TransmitArbitrarySize(uint32_t handle, void *data, size_t data_len, 
 	return 0;
 }
 
-int DectPhy_TransmitHeadOfQueueArbitrarySize(uint32_t handle, uint8_t numSlots, uint64_t start_time) 
+int DectPhy_TransmitHeadOfQueueArbitrarySize(uint32_t handle, uint8_t numSlots, bool includeBeacon, uint64_t startTime) 
 {
   int err;
   // If we have an outgoing datagram loaded up, keep sending it. 
   size_t effectivePayloadSize;
-  size_t txSizePerMcs = numSlots * mcsToBytesPerSlot[knobs.mcs];
-  DectPacket_t *frameToTx = k_malloc(txSizePerMcs); 
+  size_t txSize = numSlots * mcsToBytesPerSlot[knobs.mcs];
+  DectPacket_t *frameToTx = k_malloc(txSize); 
 
-  // memset(frameToTx, 0xff, txSizePerMcs); // TEST TODO make sure this is not needed. This is here so that we know when a frame no longer has data
+  memset(frameToTx, 0xff, txSize); // TEST TODO make sure this is not needed. This is here so that we know when a frame no longer has data
 
-  size_t numBytesToSend = DectPhy_PackFrame(frameToTx, txSizePerMcs);
+  size_t numBytesToSend = DectPhy_PackMTU(frameToTx, txSize, includeBeacon);
 
-  // TODO Handle OOM. PackFrame() now handles the loading and unloading of currentTxDatagram
+  // TODO Handle OOM. PackMTU() now handles the loading and unloading of currentTxDatagram
   if (frameToTx == NULL) // JON TODO Here if an OOM happens we shoot a blank and drop the whole datagram. there's
   {
     LOG_ERR("%s:%d OOM", __FUNCTION__, __LINE__);
@@ -695,7 +680,8 @@ int DectPhy_TransmitHeadOfQueueArbitrarySize(uint32_t handle, uint8_t numSlots, 
   {
     // We have a MTU to send. Send it off
     LOG_DBG("MTU BYTES TO SEND %d", numBytesToSend);
-    err = DectPhy_TransmitArbitrarySize(handle, frameToTx, numBytesToSend, numSlots, start_time);
+    LOG_HEXDUMP_DBG(frameToTx, numBytesToSend, "PKT");
+    err = DectPhy_TransmitArbitrarySize(handle, frameToTx, numBytesToSend, numSlots, startTime);
     numSentBytes += numBytesToSend;
     numSentEthFrames++;
   }
@@ -706,7 +692,8 @@ int DectPhy_TransmitHeadOfQueueArbitrarySize(uint32_t handle, uint8_t numSlots, 
     frameToTx->header.payloadSize = 0;
     // If we dont have a loaded up outgoing datagram, send a blank. TODO bad 
     LOG_DBG("NO PKT FROM ETH. SENDING BLANK TX");
-    err = DectPhy_Transmit(handle, frameToTx, sizeof(DectPacket_t), start_time); // TODO Change this to use the actual PDU 
+    // LOG_HEXDUMP_WRN(frameToTx, sizeof(DectPacket_t), "PKTBLANK");
+    err = DectPhy_TransmitArbitrarySize(handle, frameToTx, sizeof(DectPacket_t), numSlots, startTime); // TODO Change this to use the actual PDU 
   }
 
   k_free(frameToTx);
@@ -885,6 +872,7 @@ static void on_cancel(const struct nrf_modem_dect_phy_cancel_event *evt)
 static void dect_phy_event_handler(const struct nrf_modem_dect_phy_event *evt)
 {
   modem_time = evt->time;
+  DectScheduleItem_t doneItem;
   // LOG_DBG("%s modem_time %llu Event %d", __FUNCTION__, evt->time, evt->id);
 	switch (evt->id) {
 	case NRF_MODEM_DECT_PHY_EVT_INIT:
@@ -898,6 +886,9 @@ static void dect_phy_event_handler(const struct nrf_modem_dect_phy_event *evt)
 		break;
 	case NRF_MODEM_DECT_PHY_EVT_COMPLETED:
     numInFlightActions--;
+
+    k_msgq_get(&dectInFlightItemQueue, &doneItem, K_NO_WAIT);
+
     if (iAmFt)
     {
       DynamicFt_HandleEvent(evt);
@@ -906,6 +897,8 @@ static void dect_phy_event_handler(const struct nrf_modem_dect_phy_event *evt)
     {
       DynamicPt_HandleEvent(evt);
     }
+
+    LOG_WRN("OFF BY %lli %d", (int64_t) (doneItem.expectedEndTime) - modem_time, doneItem.action);
 		break;
 	case NRF_MODEM_DECT_PHY_EVT_CANCELED:
 		on_cancel(&evt->cancel);
@@ -913,6 +906,9 @@ static void dect_phy_event_handler(const struct nrf_modem_dect_phy_event *evt)
 	case NRF_MODEM_DECT_PHY_EVT_PCC:
     lastPccModemTick = modem_time;
     numInFlightActions--;
+
+    k_msgq_get(&dectInFlightItemQueue, &doneItem, K_NO_WAIT);
+
     if (iAmFt)
     {
       DynamicFt_HandleEvent(evt);
@@ -921,6 +917,8 @@ static void dect_phy_event_handler(const struct nrf_modem_dect_phy_event *evt)
     {
       DynamicPt_HandleEvent(evt);
     }
+    
+    LOG_WRN("OFF BY %lli %d", (int64_t) (doneItem.expectedEndTime) - modem_time, doneItem.action);
 		break;
 	case NRF_MODEM_DECT_PHY_EVT_PCC_ERROR:
 		on_pcc_crc_err(&evt->pcc_crc_err);
@@ -1076,7 +1074,6 @@ static int cmd_bridge(const struct shell *shell, size_t argc, char **argv)
 
 SHELL_CMD_ARG_REGISTER(bridge, NULL, "bridge <subcommand>", cmd_bridge, 1, 32);
 
-#define DECT_MAX_IN_FLIGHT_ACTIONS (2) // TODO header file
 struct k_thread schedulerThreadHandle;
 K_KERNEL_STACK_MEMBER(schedulerThreadStack, 1024); // TODO move these up
 static void DectPhy_SchedulerThread(void *p1, void *p2, void *p3)
@@ -1087,7 +1084,6 @@ static void DectPhy_SchedulerThread(void *p1, void *p2, void *p3)
     k_msgq_get(&dectScheduleItemQueue, &item, K_FOREVER);
     while(numInFlightActions >= DECT_MAX_IN_FLIGHT_ACTIONS)
     {
-      // k_yield();
       k_sleep(K_USEC(10));
     }
 
@@ -1102,18 +1098,19 @@ static void DectPhy_SchedulerThread(void *p1, void *p2, void *p3)
       LOG_ERR("nRF DOESNT SUPPORT numSlots %d > 4. GO AT YOUR OWN RISK", item.numSlots);
     }
     
-    LOG_DBG("TO BE SCHEDULED: %d ACTION, @ %llu, EXPECTED TO END AT %llu, NUM SLOTS %d, HANDLE %d", item.action, item.startTime, item.expectedEndTime, item.numSlots, item.handle);
+    LOG_WRN("TO BE SCHEDULED: %d ACTION, @ %llu, EXPECTED TO END AT %llu NUM SLOTS %d, HANDLE %d %s", item.action, item.startTime, item.expectedEndTime, item.numSlots, item.handle, item.followedByLast ? "FOLLOWED BY LAST" : "");
 
     switch(item.action)
     {
       case DECT_ACTION_BEACON_TX:
         {
-          DectPhy_TransmitBeacon(item.startTime);
+          // DectPhy_TransmitBeacon(item.startTime);
+          DectPhy_TransmitHeadOfQueueArbitrarySize(item.handle, item.numSlots, true, item.startTime);
           break;
         }
       case DECT_ACTION_DATA_TX:
         {
-          DectPhy_TransmitHeadOfQueueArbitrarySize(item.handle, item.numSlots, item.startTime);
+          DectPhy_TransmitHeadOfQueueArbitrarySize(item.handle, item.numSlots, false, item.startTime);
           break;
         }
       case DECT_ACTION_DATA_RX:
@@ -1127,10 +1124,12 @@ static void DectPhy_SchedulerThread(void *p1, void *p2, void *p3)
 
     numInFlightActions++;
 
+    // LOG_WRN("DIFF IN ENDINGS %lli", (int64_t) item.expectedEndTime - lastOpEnding);
+
     lastOpStart = item.startTime;
     lastOpEnding = item.expectedEndTime;
 
-    // k_msgq_put(&dectInFlightItemQueue, &item, K_NO_WAIT);
+    k_msgq_put(&dectInFlightItemQueue, &item, K_NO_WAIT);
   }
 }
 

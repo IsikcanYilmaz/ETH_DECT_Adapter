@@ -68,6 +68,7 @@ extern int64_t dectScheduleOffset;
 #define DECT_SCHEDULE_QUEUE_DEPTH_BYTES (sizeof(DectScheduleItem_t) * DECT_SCHEDULE_QUEUE_NUM_ITEMS)
 #define DECT_IN_FLIGHT_QUEUE_NUM_ITEMS (8)
 #define DECT_IN_FLIGHT_QUEUE_DEPTH_BYTES (sizeof(DectScheduleItem_t) * DECT_IN_FLIGHT_QUEUE_NUM_ITEMS)
+#define DECT_MAX_IN_FLIGHT_ACTIONS (2) 
 
 #define IS_RX_HANDLE(x) (x == BEACON_RX_HANDLE || (x >= FT_RX_HANDLE && x < PT_TX_HANDLE) || (x >= PT_RX_HANDLE && x < TX_COMBO_HANDLE) || (x >= RX_COMBO_HANDLE && x < TEST_TX_HANDLE))
 #define IS_TX_HANDLE(x) (x == BEACON_TX_HANDLE || (x >= FT_TX_HANDLE && x < FT_RX_HANDLE) || (x >= PT_TX_HANDLE && x < PT_RX_HANDLE) || (x >= TX_COMBO_HANDLE && x < RX_COMBO_HANDLE))
@@ -286,7 +287,7 @@ int DectPhy_Transmit(uint32_t handle, void *data, size_t data_len, uint64_t star
 int DectPhy_Receive(uint32_t handle, uint32_t durationTicks, uint64_t start_time);
 int DectPhy_ReceiveContinuous(uint32_t handle, uint32_t durationTicks, uint64_t start_time); 
 int DectPhy_TransmitHeadOfQueue(uint32_t handle, uint64_t start_time);
-int DectPhy_TransmitHeadOfQueueArbitrarySize(uint32_t handle, uint8_t numSlots, uint64_t start_time);
+int DectPhy_TransmitHeadOfQueueArbitrarySize(uint32_t handle, uint8_t numSlots, bool includeBeacon, uint64_t startTime);
 int DectPhy_TransmitBeacon(uint64_t start_time);
 int DectPhy_HandleIncomingPacketFragment(char *data, size_t len);
 size_t DectPhy_UnpackFrameAndProcessSDUs(DectPacket_t *frame, size_t frameSize);

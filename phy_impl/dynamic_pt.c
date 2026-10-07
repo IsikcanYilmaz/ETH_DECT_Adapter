@@ -42,8 +42,9 @@ static void mock_pdc(const struct nrf_modem_dect_phy_pdc_event *evt) // TODO mak
   
   if (pkt->header.isBeacon)
   {
-    DectBeaconMessage_t *beac = pkt->payload; 
-    LOG_WRN("ops per beacon %d", beac->ops_per_beacon);
+    // DectBeaconMessage_t *beac = pkt->payload; 
+    DectClusterBeaconMessage_t *beac = pkt->payload;
+    LOG_WRN("BEACON. SFN 0x%x, PERIOD 0x%x, DL %d, UL %d", beac->systemFrameNumber, beac->period.clusterBeaconPeriod, beac->resourceAlloc.downlink, beac->resourceAlloc.uplink);
   }
   else
   {
