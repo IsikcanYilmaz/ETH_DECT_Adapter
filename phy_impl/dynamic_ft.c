@@ -50,7 +50,7 @@ static void on_complete(const struct nrf_modem_dect_phy_op_complete_event *evt)
   // k_msgq_get(&dectInFlightItemQueue, &item, K_NO_WAIT); // TODO Check for errors on these
   // LOG_WRN("ON COMPLETE. HANDLE %d (%d). @ %llu expected %llu. diff %lli %s", evt->handle, item.handle, modem_time, item.expectedEndTime, (int64_t)(item.expectedEndTime - modem_time), (modem_time > item.expectedEndTime) ? "EXPECTED EARLIER" : "EXPECTED LATER");
 
-  LOG_WRN("ON COMPLETE @ %llu HANDLE %d ", modem_time, evt->handle);
+  LOG_DBG("ON COMPLETE @ %llu HANDLE %d ", modem_time, evt->handle);
 
   if (evt->handle == BEACON_TX_HANDLE)
   {
@@ -61,8 +61,9 @@ static void on_complete(const struct nrf_modem_dect_phy_op_complete_event *evt)
       return;
     item.action = DECT_ACTION_BEACON_TX;
     item.followedByLast = true;
-    item.numSlots = 4;
+    item.numSlots = knobs.downlink;
     item.handle = evt->handle;
+    item.headroom = DECT_HALF_HEADROOM;
     k_msgq_put(&dectScheduleItemQueue, &item, K_NO_WAIT);
     // sw = true;
   }
@@ -71,8 +72,9 @@ static void on_complete(const struct nrf_modem_dect_phy_op_complete_event *evt)
     gpio_pin_toggle_dt(dlSwitch);
     item.action = DECT_ACTION_DATA_TX;
     item.followedByLast = true;
-    item.numSlots = 4;
+    item.numSlots = knobs.downlink;
     item.handle = evt->handle;
+    item.headroom = DECT_HALF_HEADROOM;
     k_msgq_put(&dectScheduleItemQueue, &item, K_NO_WAIT);
   } 
   else if (IS_RX_HANDLE(evt->handle))
@@ -80,8 +82,9 @@ static void on_complete(const struct nrf_modem_dect_phy_op_complete_event *evt)
     gpio_pin_toggle_dt(ulSwitch);
     item.action = DECT_ACTION_DATA_RX;
     item.followedByLast = true;
-    item.numSlots = 4;
+    item.numSlots = knobs.uplink;
     item.handle = evt->handle;
+    item.headroom = DECT_HALF_HEADROOM;
     k_msgq_put(&dectScheduleItemQueue, &item, K_NO_WAIT);
   }
 
@@ -99,85 +102,52 @@ static void on_time_get(const struct nrf_modem_dect_phy_time_get_event *evt)
     uint64_t base = modem_time + US_TO_MODEM_TICKS(3000000);
     uint64_t start = base;
     uint64_t end = base + DECT_SLOT_DURATION_TICK + tx_activeToIdleLatency + dectScheduleOffset;
+    uint64_t delta; 
+    uint64_t deltaSum = 0;
     uint8_t numSlots;
     DectScheduleItem_t item;
     item.followedByLast = true;
+    item.headroom = DECT_HALF_HEADROOM;
+
+    knobs.uplink = 4;
+    knobs.downlink = 4;
+    knobs.beaconPeriod = DECT_CLUSTER_PERIOD_10MS;
+    knobs.slotsPerBeacon = slotsPerClusterPeriod[knobs.beaconPeriod];
 
     // JON TODO make this in a loop goddam
+    for (int i = 0; i < knobs.slotsPerBeacon; i++)
+    {
+      if (i % 2 == 0)
+      {
+        numSlots = knobs.downlink;
+        start = end + opTransitionLatency;
+        end = start + (numSlots * DECT_SLOT_DURATION_TICK) + tx_activeToIdleLatency + dectScheduleOffset;
+        item = (DectScheduleItem_t) {.action = (i == 0) ? DECT_ACTION_BEACON_TX : DECT_ACTION_DATA_TX, .handle = (i == 0) ? BEACON_TX_HANDLE : FT_TX_HANDLE + i, .numSlots = numSlots, .startTime = start, .expectedEndTime = end};
+        delta = end - start;
+        deltaSum += delta;
+        LOG_WRN("SCHEDULING DL. %llu %llu DELTA %llu", start, end, delta);
+        k_msgq_put(&dectScheduleItemQueue, &item, K_NO_WAIT); 
+      }
+      else
+      {
+        numSlots = knobs.uplink;
+        start = end + opTransitionLatency;
+        end = start + (numSlots * DECT_SLOT_DURATION_TICK) + rx_activeToIdleLatency + dectScheduleOffset;
+        item = (DectScheduleItem_t) {.action = DECT_ACTION_DATA_RX, .handle = FT_RX_HANDLE + i, .numSlots = numSlots, .startTime = start, .expectedEndTime = end};
+        delta = end - start;
+        deltaSum += delta;
+        LOG_WRN("SCHEDULING UL. %llu %llu DELTA %llu", start, end, delta);
+        k_msgq_put(&dectScheduleItemQueue, &item, K_NO_WAIT);
+      }
+    }
 
-    numSlots = 4;
-    start = base;
-    end = start + (numSlots * DECT_SLOT_DURATION_TICK) + tx_activeToIdleLatency + dectScheduleOffset;
-    item = (DectScheduleItem_t) {.action = DECT_ACTION_BEACON_TX, .handle = BEACON_TX_HANDLE, .numSlots = numSlots, .startTime = start, .expectedEndTime = end};
-    k_msgq_put(&dectScheduleItemQueue, &item, K_NO_WAIT); // DL
-
-    numSlots = 4;
-    start = end + opTransitionLatency;
-    end = start + (numSlots * DECT_SLOT_DURATION_TICK) + rx_activeToIdleLatency + dectScheduleOffset;
-    item = (DectScheduleItem_t) {.action = DECT_ACTION_DATA_RX, .handle = FT_RX_HANDLE + 0, .numSlots = numSlots, .startTime = start, .expectedEndTime = end};
-    k_msgq_put(&dectScheduleItemQueue, &item, K_NO_WAIT);
-
-    numSlots = 4;
-    start = end + opTransitionLatency;
-    end = start + (numSlots * DECT_SLOT_DURATION_TICK) + tx_activeToIdleLatency + dectScheduleOffset;
-    item = (DectScheduleItem_t) {.action = DECT_ACTION_DATA_TX, .handle = FT_TX_HANDLE + 1, .numSlots = numSlots, .startTime = start, .expectedEndTime = end};
-    k_msgq_put(&dectScheduleItemQueue, &item, K_NO_WAIT); // DL
-
-    numSlots = 4;
-    start = end + opTransitionLatency;
-    end = start + (numSlots * DECT_SLOT_DURATION_TICK) + rx_activeToIdleLatency + dectScheduleOffset;
-    item = (DectScheduleItem_t) {.action = DECT_ACTION_DATA_RX, .handle = FT_RX_HANDLE + 2, .numSlots = numSlots, .startTime = start, .expectedEndTime = end};
-    k_msgq_put(&dectScheduleItemQueue, &item, K_NO_WAIT);
-
-    numSlots = 4;
-    start = end + opTransitionLatency;
-    end = start + (numSlots * DECT_SLOT_DURATION_TICK) + tx_activeToIdleLatency + dectScheduleOffset;
-    item = (DectScheduleItem_t) {.action = DECT_ACTION_DATA_TX, .handle = FT_TX_HANDLE + 3, .numSlots = numSlots, .startTime = start, .expectedEndTime = end};
-    k_msgq_put(&dectScheduleItemQueue, &item, K_NO_WAIT); // DL
-
-    numSlots = 4;
-    start = end + opTransitionLatency;
-    end = start + (numSlots * DECT_SLOT_DURATION_TICK) + rx_activeToIdleLatency + dectScheduleOffset;
-    item = (DectScheduleItem_t) {.action = DECT_ACTION_DATA_RX, .handle = FT_RX_HANDLE + 4, .numSlots = numSlots, .startTime = start, .expectedEndTime = end};
-    k_msgq_put(&dectScheduleItemQueue, &item, K_NO_WAIT);
-    
-    //
-    // numSlots = 4;
-    // start = base;
-    // end = start + (numSlots * DECT_SLOT_DURATION_TICK) + dectScheduleOffset;
-    // item = (DectScheduleItem_t) {.action = DECT_ACTION_BEACON_TX, .handle = BEACON_TX_HANDLE + 1, .numSlots = numSlots, .startTime = start, .expectedEndTime = end};
-    // k_msgq_put(&dectScheduleItemQueue, &item, K_NO_WAIT); // DL
-
-    // numSlots = 4;
-    // start = end + opTransitionLatency;
-    // end = start + (numSlots * DECT_SLOT_DURATION_TICK) + dectScheduleOffset;
-    // item = (DectScheduleItem_t) {.action = DECT_ACTION_DATA_TX, .handle = FT_TX_HANDLE + 1, .numSlots = numSlots, .startTime = start, .expectedEndTime = end};
-    // k_msgq_put(&dectScheduleItemQueue, &item, K_NO_WAIT);
-    //
-    // numSlots = 4;
-    // start = end + opTransitionLatency;
-    // end = start + (numSlots * DECT_SLOT_DURATION_TICK) + dectScheduleOffset;
-    // item = (DectScheduleItem_t) {.action = DECT_ACTION_DATA_RX, .handle = FT_RX_HANDLE + 2, .numSlots = numSlots, .startTime = start, .expectedEndTime = end};
-    // k_msgq_put(&dectScheduleItemQueue, &item, K_NO_WAIT);
-    //
-    // numSlots = 4;
-    // start = end + opTransitionLatency;
-    // end = start + (numSlots * DECT_SLOT_DURATION_TICK) + dectScheduleOffset;
-    // item = (DectScheduleItem_t) {.action = DECT_ACTION_DATA_TX, .handle = FT_TX_HANDLE + 3, .numSlots = numSlots, .startTime = start, .expectedEndTime = end};
-    // k_msgq_put(&dectScheduleItemQueue, &item, K_NO_WAIT);
-    //
-    // numSlots = 4;
-    // start = end + opTransitionLatency;
-    // end = start + (numSlots * DECT_SLOT_DURATION_TICK) + dectScheduleOffset;
-    // item = (DectScheduleItem_t) {.action = DECT_ACTION_DATA_RX, .handle = FT_RX_HANDLE + 4, .numSlots = numSlots, .startTime = start, .expectedEndTime = end};
-    // k_msgq_put(&dectScheduleItemQueue, &item, K_NO_WAIT);
-
-
-    LOG_WRN("%llu", modem_time);
+    LOG_WRN("deltaSum %llu, %llu", deltaSum, end - base);
 
     LOG_WRN("lastOpEnding %llu", lastOpEnding);
 
     warmedUp = true;
+    LOG_WRN("FT Beacon period val %d, Slots per beacon %d, uplink slots %d, downlink slots %d", 
+            knobs.beaconPeriod, knobs.slotsPerBeacon, knobs.uplink, knobs.downlink);
     LOG_ERR("FT LOOP BEGIN");
     k_sem_give(&time_sem);
   }

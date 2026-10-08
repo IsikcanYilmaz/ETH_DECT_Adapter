@@ -123,6 +123,8 @@ DectKnobs_t knobs = {
 int mcsToBytesPerSlot[5] = {17, 37, 57, 77, 117};
 // NOTE : The nRF5191 doesnt support mcs above 4. So our max transferrable size is 117 * 4 = 468 B
 
+int slotsPerClusterPeriod[] = {24, 120, 240, 1200, 2400, 3600, 4800, 9600};
+
 inline uint64_t us_to_modem_ticks(uint64_t us)
 {
   return (((uint64_t) us / 1000) * NRF_MODEM_DECT_MODEM_TIME_TICK_RATE_KHZ);
@@ -484,10 +486,10 @@ static size_t DectPhy_PackMTU(DectPacket_t *frame, size_t frameSize, bool beacon
 
     DectClusterBeaconMessage_t *beac = (DectClusterBeaconMessage_t *) subframe->payload;
     beac->systemFrameNumber = 0x31;
-    beac->period.clusterBeaconPeriod = DECT_CLUSTER_PERIOD_10MS;
+    beac->period.clusterBeaconPeriod = knobs.beaconPeriod;
     beac->period.networkBeaconPeriod = 0;
-    beac->resourceAlloc.downlink = 4;
-    beac->resourceAlloc.uplink = 4;
+    beac->resourceAlloc.downlink = knobs.downlink;
+    beac->resourceAlloc.uplink = knobs.uplink;
     numBytesPacked = sizeof(DectPacket_t) + sizeof(DectClusterBeaconMessage_t);
     head += numBytesPacked;
     remainingFrameSize -= numBytesPacked;
@@ -885,9 +887,9 @@ static void dect_phy_event_handler(const struct nrf_modem_dect_phy_event *evt)
 		on_configure(&evt->configure);
 		break;
 	case NRF_MODEM_DECT_PHY_EVT_COMPLETED:
-    numInFlightActions--;
+    numInFlightActions -= (numInFlightActions) ? 1 : 0; // TODO maybe a better looking solution?
 
-    k_msgq_get(&dectInFlightItemQueue, &doneItem, K_NO_WAIT);
+    // k_msgq_get(&dectInFlightItemQueue, &doneItem, K_NO_WAIT);
 
     if (iAmFt)
     {
@@ -898,16 +900,16 @@ static void dect_phy_event_handler(const struct nrf_modem_dect_phy_event *evt)
       DynamicPt_HandleEvent(evt);
     }
 
-    LOG_WRN("OFF BY %lli %d", (int64_t) (doneItem.expectedEndTime) - modem_time, doneItem.action);
+    // LOG_WRN("OFF BY %lli %d", (int64_t) (doneItem.expectedEndTime) - modem_time, doneItem.action);
 		break;
 	case NRF_MODEM_DECT_PHY_EVT_CANCELED:
 		on_cancel(&evt->cancel);
 		break;
 	case NRF_MODEM_DECT_PHY_EVT_PCC:
     lastPccModemTick = modem_time;
-    numInFlightActions--;
+    numInFlightActions -= (numInFlightActions) ? 1 : 0;
 
-    k_msgq_get(&dectInFlightItemQueue, &doneItem, K_NO_WAIT);
+    // k_msgq_get(&dectInFlightItemQueue, &doneItem, K_NO_WAIT);
 
     if (iAmFt)
     {
@@ -918,7 +920,7 @@ static void dect_phy_event_handler(const struct nrf_modem_dect_phy_event *evt)
       DynamicPt_HandleEvent(evt);
     }
     
-    LOG_WRN("OFF BY %lli %d", (int64_t) (doneItem.expectedEndTime) - modem_time, doneItem.action);
+    // LOG_WRN("OFF BY %lli %d", (int64_t) (doneItem.expectedEndTime) - modem_time, doneItem.action);
 		break;
 	case NRF_MODEM_DECT_PHY_EVT_PCC_ERROR:
 		on_pcc_crc_err(&evt->pcc_crc_err);
@@ -1084,7 +1086,7 @@ static void DectPhy_SchedulerThread(void *p1, void *p2, void *p3)
     k_msgq_get(&dectScheduleItemQueue, &item, K_FOREVER);
     while(numInFlightActions >= DECT_MAX_IN_FLIGHT_ACTIONS)
     {
-      k_sleep(K_USEC(10));
+      k_sleep(K_USEC(1));
     }
 
     if (item.followedByLast)
@@ -1098,7 +1100,7 @@ static void DectPhy_SchedulerThread(void *p1, void *p2, void *p3)
       LOG_ERR("nRF DOESNT SUPPORT numSlots %d > 4. GO AT YOUR OWN RISK", item.numSlots);
     }
     
-    LOG_WRN("TO BE SCHEDULED: %d ACTION, @ %llu, EXPECTED TO END AT %llu NUM SLOTS %d, HANDLE %d %s", item.action, item.startTime, item.expectedEndTime, item.numSlots, item.handle, item.followedByLast ? "FOLLOWED BY LAST" : "");
+    LOG_DBG("TO BE SCHEDULED: %d ACTION, @ %llu, EXPECTED TO END AT %llu NUM SLOTS %d, HANDLE %d %s", item.action, item.startTime, item.expectedEndTime, item.numSlots, item.handle, item.followedByLast ? "FOLLOWED BY LAST" : "");
 
     switch(item.action)
     {
@@ -1119,7 +1121,10 @@ static void DectPhy_SchedulerThread(void *p1, void *p2, void *p3)
           break;
         }
       default:
-        break;
+        {
+          LOG_ERR("UNKNOWN OR UNUSED DECT ACTION %s:%d", __FUNCTION__, __LINE__);
+          break;
+        }
     }
 
     numInFlightActions++;
@@ -1129,7 +1134,7 @@ static void DectPhy_SchedulerThread(void *p1, void *p2, void *p3)
     lastOpStart = item.startTime;
     lastOpEnding = item.expectedEndTime;
 
-    k_msgq_put(&dectInFlightItemQueue, &item, K_NO_WAIT);
+    // k_msgq_put(&dectInFlightItemQueue, &item, K_NO_WAIT);
   }
 }
 

@@ -33,21 +33,54 @@ static void mock_pdc(const struct nrf_modem_dect_phy_pdc_event *evt) // TODO mak
   int err;
   DectPacket_t *pkt = (DectPacket_t *) evt->data;
   bool isBeacon = pkt->header.isBeacon;
-  LOG_WRN("RECEIVED DECT Pkt. HEADER 0x%04x. PL SIZE %d. %s" , 
-          * (uint16_t *) &pkt->header,
-          pkt->header.payloadSize,
-          pkt->header.isBeacon ? "BEACON" : "NON BEACON"
-          );
-  LOG_HEXDUMP_WRN(evt->data, evt->len, "PDC");
+  // LOG_WRN("RECEIVED DECT Pkt. HANDLE %d HEADER 0x%04x. PL SIZE %d. %s" , 
+  //         evt->handle,
+  //         * (uint16_t *) &pkt->header,
+  //         pkt->header.payloadSize,
+  //         pkt->header.isBeacon ? "BEACON" : "NON BEACON"
+  //         );
+  // LOG_HEXDUMP_WRN(evt->data, evt->len, "PDC");
+
+  LOG_WRN("HANDLE %d RECEIVED", evt->handle);
+
+  static bool sw = false;
   
   if (pkt->header.isBeacon)
   {
-    // DectBeaconMessage_t *beac = pkt->payload; 
+    gpio_pin_toggle_dt(beaconTxSwitch);
+
     DectClusterBeaconMessage_t *beac = pkt->payload;
     LOG_WRN("BEACON. SFN 0x%x, PERIOD 0x%x, DL %d, UL %d", beac->systemFrameNumber, beac->period.clusterBeaconPeriod, beac->resourceAlloc.downlink, beac->resourceAlloc.uplink);
+    int slotsUntilNextBeacon = slotsPerClusterPeriod[beac->period.clusterBeaconPeriod] - beac->resourceAlloc.downlink;
+    uint64_t dlEstimatedTimeTaken = opTransitionLatency + ((beac->resourceAlloc.downlink * DECT_SLOT_DURATION_TICK) + tx_activeToIdleLatency + dectScheduleOffset);
+    uint64_t ulEstimatedTimeTaken = opTransitionLatency + ((beac->resourceAlloc.downlink * DECT_SLOT_DURATION_TICK) + rx_activeToIdleLatency + dectScheduleOffset);
+    int dlUlPairsUntilBeacon = slotsPerClusterPeriod[beac->period.clusterBeaconPeriod] / (beac->resourceAlloc.downlink + beac->resourceAlloc.uplink);
+
+    uint64_t ticksUntilNextBeacon = (dlUlPairsUntilBeacon * (dlEstimatedTimeTaken + ulEstimatedTimeTaken)) - dlEstimatedTimeTaken;
+    LOG_WRN("THIS MUST MEAN THERE IS %d SLOTS UNTIL NEXT BEACON. %llu", slotsUntilNextBeacon, ticksUntilNextBeacon);
+    
+    // DectPhy_Receive(BEACON_RX_HANDLE + beac->systemFrameNumber, DECT_SLOT_DURATION_TICK + DECT_HALF_HEADROOM, modem_time + ticksUntilNextBeacon);
+    
+    DectScheduleItem_t schItem = (DectScheduleItem_t) {
+      .action = DECT_ACTION_DATA_RX, 
+      .handle = BEACON_RX_HANDLE + beac->systemFrameNumber, 
+      .numSlots = beac->resourceAlloc.downlink,
+      .startTime = modem_time + ticksUntilNextBeacon,
+      .expectedEndTime = modem_time + ticksUntilNextBeacon + DECT_SLOT_DURATION_TICK,
+      .headroom = DECT_HALF_HEADROOM
+    };
+
+    k_msgq_put(&dectScheduleItemQueue, &schItem, K_NO_WAIT);
+
+    LOG_WRN("ENQUEUED ITEM");
+
+    sw = true;
+
   }
   else
   {
+    if (sw)
+      return;
     DectPhy_Receive(BEACON_RX_HANDLE, 0xffffffff, 0);
   }
 }
@@ -55,6 +88,12 @@ static void mock_pdc(const struct nrf_modem_dect_phy_pdc_event *evt) // TODO mak
 static void mock_complete(const struct nrf_modem_dect_phy_op_complete_event *evt)
 {
   int err;
+  LOG_WRN("HANDLE %d COMPLETE", evt->handle);
+  if (evt->err) /////////////////////////////////////// MODEM ERROR //////////////////////
+  {
+    LOG_ERR("%s ERROR %x HANDLE %d @ MT %llu", __FUNCTION__, evt->err, evt->handle, modem_time);
+  }
+  // DectPhy_Receive(BEACON_RX_HANDLE, 0xffffffff, 0);
   k_sem_give(&operation_sem);
 }
 

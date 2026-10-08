@@ -130,19 +130,22 @@ typedef enum
   DECT_CLUSTER_PERIOD_1500MS,
   DECT_CLUSTER_PERIOD_2000MS,
   DECT_CLUSTER_PERIOD_4000MS,
+  DECT_CLUSTER_PERIOD_MAX,
   DECT_CLUSTER_PERIOD_8000MS,
   DECT_CLUSTER_PERIOD_16000MS,
   DECT_CLUSTER_PERIOD_32000MS,
-  DECT_CLUSTER_PERIOD_MAX,
+  DECT_CLUSTER_PERIOD_MAX_MAX,
 } DectClusterBeaconPeriod_e;
 
 typedef struct 
 {
   uint8_t systemFrameNumber;
+
   struct {
     unsigned networkBeaconPeriod : 4; // TODO Currently unused since we dont have network beacons
     unsigned clusterBeaconPeriod : 4; 
   } __attribute__ ((packed)) period;
+
   struct {
     unsigned downlink : 4;
     unsigned uplink : 4;
@@ -157,6 +160,9 @@ typedef struct DectKnobs_s
   uint16_t ops_per_beacon;
   uint16_t carrier;
   DectClusterBeaconPeriod_e beaconPeriod;
+  uint16_t slotsPerBeacon;
+  uint8_t downlink;
+  uint8_t uplink;
 } DectKnobs_t;
 
 enum DectPtState_e
@@ -278,6 +284,8 @@ extern struct k_sem cancel_sem;
 extern sys_slist_t ops_list;
 
 extern DectKnobs_t knobs;
+
+extern int slotsPerClusterPeriod[];
 
 void DectPhy_Main(bool iAmFt);
 bool DectPhy_WiznetAlert(void); // TODO better way of doing this
