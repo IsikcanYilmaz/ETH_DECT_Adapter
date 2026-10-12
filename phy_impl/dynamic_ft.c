@@ -21,6 +21,15 @@ static void on_pdc(const struct nrf_modem_dect_phy_pdc_event *evt)
 {
   LOG_DBG("%s %d handle, %d bytes", __FUNCTION__, evt->handle, evt->len);
   LOG_HEXDUMP_DBG(evt->data, evt->len, "RX");
+
+  DectPacket_t *pkt = (DectPacket_t *) evt->data;
+  LOG_WRN("RECEIVED DECT Pkt. HANDLE %d HEADER 0x%04x. PL SIZE %d" , 
+          evt->handle,
+          * (uint16_t *) &pkt->header,
+          pkt->header.payloadSize
+          );
+
+
   if (!DectPhy_PktIsNone(evt->data))
   {
     // DectPhy_HandleIncomingPacketFragment(evt->data, evt->len);
@@ -30,10 +39,6 @@ static void on_pdc(const struct nrf_modem_dect_phy_pdc_event *evt)
 
 static void on_pcc(const struct nrf_modem_dect_phy_pcc_event *evt) 
 {
-  if (evt->header_status)
-  {
-    LOG_ERR("PCC %d @ %llu", evt->header_status, modem_time);
-  }
   LOG_DBG("PCC %d @ %llu", evt->header_status, modem_time);
 }
 
@@ -63,7 +68,7 @@ static void on_complete(const struct nrf_modem_dect_phy_op_complete_event *evt)
     item.followedByLast = true;
     item.numSlots = knobs.downlink;
     item.handle = evt->handle;
-    item.headroom = DECT_HALF_HEADROOM;
+    item.headroom = DECT_HEADROOM;
     k_msgq_put(&dectScheduleItemQueue, &item, K_NO_WAIT);
     // sw = true;
   }
@@ -74,7 +79,7 @@ static void on_complete(const struct nrf_modem_dect_phy_op_complete_event *evt)
     item.followedByLast = true;
     item.numSlots = knobs.downlink;
     item.handle = evt->handle;
-    item.headroom = DECT_HALF_HEADROOM;
+    item.headroom = DECT_HEADROOM;
     k_msgq_put(&dectScheduleItemQueue, &item, K_NO_WAIT);
   } 
   else if (IS_RX_HANDLE(evt->handle))
@@ -84,7 +89,7 @@ static void on_complete(const struct nrf_modem_dect_phy_op_complete_event *evt)
     item.followedByLast = true;
     item.numSlots = knobs.uplink;
     item.handle = evt->handle;
-    item.headroom = DECT_HALF_HEADROOM;
+    item.headroom = DECT_HEADROOM;
     k_msgq_put(&dectScheduleItemQueue, &item, K_NO_WAIT);
   }
 
@@ -107,38 +112,52 @@ static void on_time_get(const struct nrf_modem_dect_phy_time_get_event *evt)
     uint8_t numSlots;
     DectScheduleItem_t item;
     item.followedByLast = true;
-    item.headroom = DECT_HALF_HEADROOM;
+    item.headroom = DECT_HEADROOM;
 
     knobs.uplink = 4;
     knobs.downlink = 4;
     knobs.beaconPeriod = DECT_CLUSTER_PERIOD_10MS;
     knobs.slotsPerBeacon = slotsPerClusterPeriod[knobs.beaconPeriod];
 
-    // JON TODO make this in a loop goddam
-    for (int i = 0; i < knobs.slotsPerBeacon; i++)
+    // Enqueue the first thing, then do the rest
+    item = (DectScheduleItem_t) {
+      .action = DECT_ACTION_BEACON_TX, 
+      .effectiveStartTime = base,
+      .headroom = DECT_HEADROOM,
+      .numSlots = knobs.downlink,
+      .followedByLast = false,
+      .handle = BEACON_TX_HANDLE
+    };
+    k_msgq_put(&dectScheduleItemQueue, &item, K_NO_WAIT); 
+
+    int i = knobs.downlink;
+    while(i < knobs.slotsPerBeacon)
     {
-      if (i % 2 == 0)
+      if (i % (knobs.uplink + knobs.downlink) == 0) // DL
       {
-        numSlots = knobs.downlink;
-        start = end + opTransitionLatency;
-        end = start + (numSlots * DECT_SLOT_DURATION_TICK) + tx_activeToIdleLatency + dectScheduleOffset;
-        item = (DectScheduleItem_t) {.action = (i == 0) ? DECT_ACTION_BEACON_TX : DECT_ACTION_DATA_TX, .handle = (i == 0) ? BEACON_TX_HANDLE : FT_TX_HANDLE + i, .numSlots = numSlots, .startTime = start, .expectedEndTime = end};
-        delta = end - start;
-        deltaSum += delta;
-        LOG_WRN("SCHEDULING DL. %llu %llu DELTA %llu", start, end, delta);
-        k_msgq_put(&dectScheduleItemQueue, &item, K_NO_WAIT); 
+        item = (DectScheduleItem_t)
+          {
+            .action = DECT_ACTION_DATA_TX,
+            .followedByLast = true,
+            .headroom = DECT_HEADROOM,
+            .numSlots = knobs.downlink,
+            .handle = FT_TX_HANDLE + i
+          };
+        i += knobs.downlink;
       }
-      else
+      else // UL
       {
-        numSlots = knobs.uplink;
-        start = end + opTransitionLatency;
-        end = start + (numSlots * DECT_SLOT_DURATION_TICK) + rx_activeToIdleLatency + dectScheduleOffset;
-        item = (DectScheduleItem_t) {.action = DECT_ACTION_DATA_RX, .handle = FT_RX_HANDLE + i, .numSlots = numSlots, .startTime = start, .expectedEndTime = end};
-        delta = end - start;
-        deltaSum += delta;
-        LOG_WRN("SCHEDULING UL. %llu %llu DELTA %llu", start, end, delta);
-        k_msgq_put(&dectScheduleItemQueue, &item, K_NO_WAIT);
+        item = (DectScheduleItem_t)
+          {
+            .action = DECT_ACTION_DATA_RX,
+            .followedByLast = true,
+            .headroom = DECT_HEADROOM,
+            .numSlots = knobs.uplink,
+            .handle = FT_RX_HANDLE + i
+          };
+        i += knobs.uplink;
       }
+      k_msgq_put(&dectScheduleItemQueue, &item, K_NO_WAIT); 
     }
 
     LOG_WRN("deltaSum %llu, %llu", deltaSum, end - base);
@@ -159,7 +178,7 @@ void DynamicFt_HandleEvent(const struct nrf_modem_dect_phy_event *evt)
 { 
   if (evt->id == NRF_MODEM_DECT_PHY_EVT_PDC)
   {
-    // on_pdc(&evt->pdc);
+    on_pdc(&evt->pdc);
   }
   else if (evt->id == NRF_MODEM_DECT_PHY_EVT_COMPLETED)
   {

@@ -171,6 +171,7 @@ uint64_t genericRelativeRxSchedule;
 static uint64_t lastOpStart;
 static uint64_t lastOpEnding;
 static volatile uint16_t numInFlightActions = 0;
+uint8_t systemFrameNumberCounter = 0;
 
 static volatile bool iAmFt;
 
@@ -202,6 +203,8 @@ K_SEM_DEFINE(tx_done_sem, 0, 1);
 K_SEM_DEFINE(time_sem, 0, 1);
 K_SEM_DEFINE(done_sem, 0, 1);
 K_SEM_DEFINE(resync_sem, 0, 1);
+
+K_SEM_DEFINE(in_flight_sem, 0, DECT_MAX_IN_FLIGHT_ACTIONS);
 
 // TODO Depricate
 bool DectPhy_PktIsBeacon(char *pkt)
@@ -427,6 +430,9 @@ int DectPhy_HandleSDUFragment(char *data, size_t len)
 }
 
 // This is the funnel where the packets that we receive from the DECT channel should go to.
+// frameSize is meant to be the size of the pht layer transmission. not what a payload size field says. 
+// That means each DectPacket_t header will say how many bytes ahead of it are payload. If the header says 0 for isData and isBeacon, 
+// we call the processing of this transmission done.
 size_t DectPhy_UnpackFrameAndProcessSDUs(DectPacket_t *frame, size_t frameSize)
 {
   DectPacket_t *currentSdu = frame;
@@ -485,7 +491,7 @@ static size_t DectPhy_PackMTU(DectPacket_t *frame, size_t frameSize, bool beacon
     subframe->header.payloadSize = sizeof(DectClusterBeaconMessage_t);
 
     DectClusterBeaconMessage_t *beac = (DectClusterBeaconMessage_t *) subframe->payload;
-    beac->systemFrameNumber = 0x31;
+    beac->systemFrameNumber = systemFrameNumberCounter;
     beac->period.clusterBeaconPeriod = knobs.beaconPeriod;
     beac->period.networkBeaconPeriod = 0;
     beac->resourceAlloc.downlink = knobs.downlink;
@@ -493,6 +499,8 @@ static size_t DectPhy_PackMTU(DectPacket_t *frame, size_t frameSize, bool beacon
     numBytesPacked = sizeof(DectPacket_t) + sizeof(DectClusterBeaconMessage_t);
     head += numBytesPacked;
     remainingFrameSize -= numBytesPacked;
+
+    systemFrameNumberCounter++;
 
     LOG_DBG("PACKING BEACON. DECT HEADER 0x%02x . PL SIZE %d. CLUSTER HEADER", * (uint16_t *) &subframe->header, subframe->header.payloadSize);
   }
@@ -549,15 +557,13 @@ static size_t DectPhy_PackMTU(DectPacket_t *frame, size_t frameSize, bool beacon
 
     // Start filling out the headers
     DectPacket_t *subframe = head;
-    // subframe->flags = 0;
-    // subframe->flags |= (1 << DECT_DATA_PACKET_FLAG_BIT); // TODO only do this if this is a data SDU
+    * (uint16_t *) &subframe->header = 0; // fresh dect pkt header
     subframe->header.isData = 1;
     subframe->header.payloadSize = sduSize;
     
     // If this is a fragment, use up some of our real estate for the fragmentation header
     if (needsFragmenting)
     {
-      // subframe->flags |= (1 << DECT_FRAG_HEADER_EXISTS_FLAG_BIT); 
       subframe->header.isFragment = 1; 
       DectFragmentationHeader_t *fragHeader = (DectFragmentationHeader_t *) subframe->payload;
       fragHeader->datagramSize = currentTxDatagram->size;
@@ -667,7 +673,7 @@ int DectPhy_TransmitHeadOfQueueArbitrarySize(uint32_t handle, uint8_t numSlots, 
   size_t txSize = numSlots * mcsToBytesPerSlot[knobs.mcs];
   DectPacket_t *frameToTx = k_malloc(txSize); 
 
-  memset(frameToTx, 0xff, txSize); // TEST TODO make sure this is not needed. This is here so that we know when a frame no longer has data
+  memset(frameToTx, 0x00, txSize); // TEST TODO make sure this is not needed. This is here so that we know when a frame no longer has data
 
   size_t numBytesToSend = DectPhy_PackMTU(frameToTx, txSize, includeBeacon);
 
@@ -681,8 +687,8 @@ int DectPhy_TransmitHeadOfQueueArbitrarySize(uint32_t handle, uint8_t numSlots, 
   if (numBytesToSend)
   {
     // We have a MTU to send. Send it off
-    LOG_DBG("MTU BYTES TO SEND %d", numBytesToSend);
-    LOG_HEXDUMP_DBG(frameToTx, numBytesToSend, "PKT");
+    LOG_DBG("MTU BYTES TO SEND %d %s %s", numBytesToSend, frameToTx->header.isBeacon ? "BEAC" : "", frameToTx->header.isData ? "DATA" : "");
+    LOG_HEXDUMP_DBG(frameToTx, numBytesToSend, (includeBeacon) ? "PKT + BEAC" : "PKT");
     err = DectPhy_TransmitArbitrarySize(handle, frameToTx, numBytesToSend, numSlots, startTime);
     numSentBytes += numBytesToSend;
     numSentEthFrames++;
@@ -690,7 +696,7 @@ int DectPhy_TransmitHeadOfQueueArbitrarySize(uint32_t handle, uint8_t numSlots, 
   else
   {
     * (uint16_t *) &frameToTx->header = 0x00;
-    frameToTx->header.isData = 1;
+    frameToTx->header.isData = 0;
     frameToTx->header.payloadSize = 0;
     // If we dont have a loaded up outgoing datagram, send a blank. TODO bad 
     LOG_DBG("NO PKT FROM ETH. SENDING BLANK TX");
@@ -818,6 +824,11 @@ static void on_capability_get(const struct nrf_modem_dect_phy_capability_get_eve
 static void on_pcc(const struct nrf_modem_dect_phy_pcc_event *evt)
 {
 	LOG_DBG("PCC Received header from device ID %d", evt->hdr.hdr_type_1.transmitter_id_hi << 8 | evt->hdr.hdr_type_1.transmitter_id_lo);
+  if (evt->header_status)
+  {
+    LOG_ERR("PCC HANDLE %d STATUS %d @ %llu", evt->handle, evt->header_status, modem_time);
+  }
+
 }
 
 static void on_pcc_crc_err(const struct nrf_modem_dect_phy_pcc_crc_failure_event *evt)
@@ -907,9 +918,7 @@ static void dect_phy_event_handler(const struct nrf_modem_dect_phy_event *evt)
 		break;
 	case NRF_MODEM_DECT_PHY_EVT_PCC:
     lastPccModemTick = modem_time;
-    numInFlightActions -= (numInFlightActions) ? 1 : 0;
-
-    // k_msgq_get(&dectInFlightItemQueue, &doneItem, K_NO_WAIT);
+    // numInFlightActions -= (numInFlightActions) ? 1 : 0;
 
     if (iAmFt)
     {
@@ -1078,27 +1087,37 @@ SHELL_CMD_ARG_REGISTER(bridge, NULL, "bridge <subcommand>", cmd_bridge, 1, 32);
 
 struct k_thread schedulerThreadHandle;
 K_KERNEL_STACK_MEMBER(schedulerThreadStack, 1024); // TODO move these up
+int DectPhy_QueueNewAction(DectActionType_e action, uint8_t numSlots, uint64_t headroom)
+{
+  
+  return 0;
+}
+
 static void DectPhy_SchedulerThread(void *p1, void *p2, void *p3)
 {
   DectScheduleItem_t item;
   while(true)
   {
     k_msgq_get(&dectScheduleItemQueue, &item, K_FOREVER);
-    while(numInFlightActions >= DECT_MAX_IN_FLIGHT_ACTIONS)
+    while(numInFlightActions >= DECT_MAX_IN_FLIGHT_ACTIONS) // TODO do this with semaphores
     {
+      // LOG_ERR("WAITING FOR IN FLIGHT");
       k_sleep(K_USEC(1));
     }
 
     if (item.followedByLast)
     {
-      item.startTime = lastOpEnding + opTransitionLatency;
-      item.expectedEndTime = item.startTime + (item.numSlots * DECT_SLOT_DURATION_TICK) + dectScheduleOffset + ((item.action < DECT_ACTION_RX) ? tx_activeToIdleLatency : rx_activeToIdleLatency);
+      item.effectiveStartTime = lastOpEnding;
     }
 
     if (item.numSlots > 4 && item.action == DECT_ACTION_DATA_TX)
     {
       LOG_ERR("nRF DOESNT SUPPORT numSlots %d > 4. GO AT YOUR OWN RISK", item.numSlots);
     }
+
+    // schedule time = effective start time + headroom
+    item.scheduleStartTime = item.effectiveStartTime + ((item.action < DECT_ACTION_RX) ? item.headroom : 0); 
+    item.effectiveEndTime = item.effectiveStartTime + item.headroom + (item.numSlots * DECT_SLOT_DURATION_TICK) + item.headroom;
     
     LOG_DBG("TO BE SCHEDULED: %d ACTION, @ %llu, EXPECTED TO END AT %llu NUM SLOTS %d, HANDLE %d %s", item.action, item.startTime, item.expectedEndTime, item.numSlots, item.handle, item.followedByLast ? "FOLLOWED BY LAST" : "");
 
@@ -1106,23 +1125,23 @@ static void DectPhy_SchedulerThread(void *p1, void *p2, void *p3)
     {
       case DECT_ACTION_BEACON_TX:
         {
-          // DectPhy_TransmitBeacon(item.startTime);
-          DectPhy_TransmitHeadOfQueueArbitrarySize(item.handle, item.numSlots, true, item.startTime);
+          DectPhy_TransmitHeadOfQueueArbitrarySize(item.handle, item.numSlots, true, item.scheduleStartTime);
           break;
         }
       case DECT_ACTION_DATA_TX:
         {
-          DectPhy_TransmitHeadOfQueueArbitrarySize(item.handle, item.numSlots, false, item.startTime);
+          DectPhy_TransmitHeadOfQueueArbitrarySize(item.handle, item.numSlots, false, item.scheduleStartTime);
           break;
         }
       case DECT_ACTION_DATA_RX:
+      case DECT_ACTION_BEACON_RX:
         {
-          DectPhy_Receive(item.handle, item.numSlots * DECT_SLOT_DURATION_TICK, item.startTime);
+          DectPhy_Receive(item.handle, (item.numSlots * DECT_SLOT_DURATION_TICK) + item.headroom , item.scheduleStartTime + item.headroom);
           break;
         }
       default:
         {
-          LOG_ERR("UNKNOWN OR UNUSED DECT ACTION %s:%d", __FUNCTION__, __LINE__);
+          LOG_ERR("UNKNOWN OR UNUSED DECT ACTION %d %s:%d", item.action, __FUNCTION__, __LINE__);
           break;
         }
     }
@@ -1131,8 +1150,10 @@ static void DectPhy_SchedulerThread(void *p1, void *p2, void *p3)
 
     // LOG_WRN("DIFF IN ENDINGS %lli", (int64_t) item.expectedEndTime - lastOpEnding);
 
-    lastOpStart = item.startTime;
-    lastOpEnding = item.expectedEndTime;
+    lastOpStart = item.effectiveStartTime;
+    // lastOpEnding = item.expectedEndTime;
+
+    lastOpEnding = item.effectiveEndTime;
 
     // k_msgq_put(&dectInFlightItemQueue, &item, K_NO_WAIT);
   }

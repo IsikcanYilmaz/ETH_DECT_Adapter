@@ -20,7 +20,7 @@
 #define DECT_SLOT_DURATION_TICK (28800)
 #define DECT_HALF_SLOT_DURATION_TICK (14400)
 
-#define DECT_HEADROOM (US_TO_MODEM_TICKS(500))
+#define DECT_HEADROOM (US_TO_MODEM_TICKS(1000))
 #define DECT_HALF_HEADROOM (DECT_HEADROOM/2) 
 #define DECT_QUART_HEADROOM (DECT_HEADROOM/4)
 
@@ -45,6 +45,7 @@ typedef enum
   DECT_ACTION_DATA_RX,
 
   DECT_ACTION_FLUSH,
+  DECT_ACTION_BLANK,
   DECT_ACTION_ACTION_END
 } DectActionType_e;
 
@@ -53,11 +54,16 @@ typedef struct
   DectActionType_e action;
   uint32_t handle;
   uint8_t numSlots;
-  uint64_t headroom;
   uint64_t startTime;
   uint64_t expectedEndTime;
   uint32_t rxDuration; // only for rx // TODO may not be needed
   bool followedByLast;
+
+  uint64_t effectiveStartTime;
+  uint64_t scheduleStartTime; // the scheduler should fill this part
+  uint64_t effectiveEndTime; // the scheduler should fill this part 
+  uint64_t headroom; // will be before and after
+
 } DectScheduleItem_t; // 18 bytes
 
 extern struct k_msgq dectScheduleItemQueue;
@@ -120,7 +126,7 @@ typedef struct DectBeaconMessage_s
 // BEACON IE AND STRUCTS ///////////////////////////
 // The below beacon message structure mimics the Cluster Beacon with hints of the ResourcE Allocation IE. It handles time synchronization
 // The resource alloc part assumes allocation type for both uplink and downlink. 
-typedef enum 
+typedef enum  // TODO change these enums from time to num frames
 {
   DECT_CLUSTER_PERIOD_10MS, // Every frame
   DECT_CLUSTER_PERIOD_50MS, // Every 5 frames
