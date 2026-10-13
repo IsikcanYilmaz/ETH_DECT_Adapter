@@ -20,7 +20,7 @@
 #define DECT_SLOT_DURATION_TICK (28800)
 #define DECT_HALF_SLOT_DURATION_TICK (14400)
 
-#define DECT_HEADROOM (US_TO_MODEM_TICKS(1000))
+#define DECT_HEADROOM (US_TO_MODEM_TICKS(500))
 #define DECT_HALF_HEADROOM (DECT_HEADROOM/2) 
 #define DECT_QUART_HEADROOM (DECT_HEADROOM/4)
 
@@ -97,8 +97,13 @@ typedef struct DectPacket_s
     unsigned isData : 1;
     unsigned isBeacon : 1;
     unsigned isFragment : 1;
-    unsigned reserved : 4;
-    unsigned payloadSize : 9;  // max 511, above what the nRF supports
+    unsigned reserved : 3;
+    unsigned payloadSize : 10;  // max 1023, fairly above what the nRF supports per tx
+    // should include the size of every header EXCEPT this header. If this frame contains multiple SDUs, 
+    // there's one of this header for each. 
+    // { [DectPacket_t ][ PL1] [DectPacket_t ][ PL2 ] ... } 
+    //    this header
+    //    contains the payload size of PL1
   } __attribute__((packed)) header; // 2 bytes
   char payload[];
 } __attribute__((packed)) DectPacket_t;
@@ -143,7 +148,7 @@ typedef enum  // TODO change these enums from time to num frames
   DECT_CLUSTER_PERIOD_MAX_MAX,
 } DectClusterBeaconPeriod_e;
 
-typedef struct 
+typedef struct // 3 BYTES
 {
   uint8_t systemFrameNumber;
 
@@ -245,6 +250,7 @@ extern uint64_t lastPccModemTick;
 extern uint64_t lastPdcModemTick;
 extern uint64_t lastBeaconModemTick;
 extern uint64_t lastLoopModemTick;
+extern uint64_t lastPccStfStartTime;
 extern uint64_t pccPdcDiff;
 
 extern uint32_t lastBeaconTs;

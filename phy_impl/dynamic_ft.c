@@ -23,17 +23,16 @@ static void on_pdc(const struct nrf_modem_dect_phy_pdc_event *evt)
   LOG_HEXDUMP_DBG(evt->data, evt->len, "RX");
 
   DectPacket_t *pkt = (DectPacket_t *) evt->data;
-  LOG_WRN("RECEIVED DECT Pkt. HANDLE %d HEADER 0x%04x. PL SIZE %d" , 
+  LOG_DBG("RECEIVED DECT Pkt. HANDLE %d HEADER 0x%04x. PL SIZE %d" , 
           evt->handle,
           * (uint16_t *) &pkt->header,
           pkt->header.payloadSize
           );
 
 
-  if (!DectPhy_PktIsNone(evt->data))
+  if (pkt->header.isData)
   {
-    // DectPhy_HandleIncomingPacketFragment(evt->data, evt->len);
-    DectPhy_UnpackFrameAndProcessSDUs(evt->data, evt->len);
+    // DectPhy_UnpackFrameAndProcessSDUs(evt->data, evt->len); // TODO bring this back
   }
 }
 
@@ -114,8 +113,9 @@ static void on_time_get(const struct nrf_modem_dect_phy_time_get_event *evt)
     item.followedByLast = true;
     item.headroom = DECT_HEADROOM;
 
-    knobs.uplink = 4;
-    knobs.downlink = 4;
+    knobs.uplink = 1;
+    knobs.downlink = 1;
+
     knobs.beaconPeriod = DECT_CLUSTER_PERIOD_10MS;
     knobs.slotsPerBeacon = slotsPerClusterPeriod[knobs.beaconPeriod];
 

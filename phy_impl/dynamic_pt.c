@@ -32,21 +32,7 @@ static void mock_pdc(const struct nrf_modem_dect_phy_pdc_event *evt) // TODO mak
   DectPacket_t *pkt = (DectPacket_t *) evt->data;
   bool isBeacon = pkt->header.isBeacon;
 
-  // if (!isBeacon)
-  {
-    // LOG_WRN("RECEIVED DECT Pkt. HANDLE %d HEADER 0x%04x. PL SIZE %d. %s" , 
-    //         evt->handle,
-    //         * (uint16_t *) &pkt->header,
-    //         pkt->header.payloadSize,
-    //         pkt->header.isBeacon ? "BEACON" : "NON BEACON"
-    //         );
-    // if (pkt->header.payloadSize)
-      // LOG_HEXDUMP_WRN(pkt->payload, pkt->header.payloadSize, "PDC");
-  }
-
-  LOG_DBG("HANDLE %d RECEIVED", evt->handle);
-
-  static bool sw = false;
+  LOG_DBG("HANDLE %d RECEIVED. %llu %llu", evt->handle, lastPccStfStartTime, modem_time);
 
   if (pkt->header.isBeacon)
   {
@@ -65,12 +51,15 @@ static void mock_pdc(const struct nrf_modem_dect_phy_pdc_event *evt) // TODO mak
     __ASSERT((beac->resourceAlloc.downlink + beac->resourceAlloc.uplink) > 0, "beac->dl + ul was 0, expected > 0. dl %d ul %d", beac->resourceAlloc.downlink, beac->resourceAlloc.uplink);
 
     LOG_DBG("BEACON. SFN 0x%x, PERIOD 0x%x, DL %d, UL %d", beac->systemFrameNumber, beac->period.clusterBeaconPeriod, beac->resourceAlloc.downlink, beac->resourceAlloc.uplink);
+
     int slotsUntilNextBeacon = slotsPerClusterPeriod[beac->period.clusterBeaconPeriod] - beac->resourceAlloc.downlink;
-    uint64_t dlEstimatedTimeTaken = (beac->resourceAlloc.downlink * DECT_SLOT_DURATION_TICK) + (2 * DECT_HEADROOM);
-    uint64_t ulEstimatedTimeTaken = (beac->resourceAlloc.uplink * DECT_SLOT_DURATION_TICK) + (2 * DECT_HEADROOM);
     int dlUlPairsUntilBeacon = slotsPerClusterPeriod[beac->period.clusterBeaconPeriod] / (beac->resourceAlloc.downlink + beac->resourceAlloc.uplink);
 
+    uint64_t dlEstimatedTimeTaken = (beac->resourceAlloc.downlink * DECT_SLOT_DURATION_TICK) + (2 * DECT_HEADROOM);
+    uint64_t ulEstimatedTimeTaken = (beac->resourceAlloc.uplink * DECT_SLOT_DURATION_TICK) + (2 * DECT_HEADROOM);
+
     uint64_t ticksUntilNextBeacon = (dlUlPairsUntilBeacon * (dlEstimatedTimeTaken + ulEstimatedTimeTaken)) - dlEstimatedTimeTaken;
+    
     LOG_DBG("THIS MUST MEAN THERE IS %d SLOTS UNTIL NEXT BEACON. %llu - %llu", slotsUntilNextBeacon, ticksUntilNextBeacon, ticksUntilNextBeacon + dlEstimatedTimeTaken);
     
     knobs.uplink = beac->resourceAlloc.uplink;
@@ -87,10 +76,8 @@ static void mock_pdc(const struct nrf_modem_dect_phy_pdc_event *evt) // TODO mak
       .followedByLast = false,
       .headroom = DECT_HEADROOM,
     };
-
     k_msgq_put(&dectScheduleItemQueue, &schItem, K_NO_WAIT);
 
-    int cnt = 0; // TODO rm
     int i = knobs.downlink;
     while (i < knobs.slotsPerBeacon)
     {
@@ -119,16 +106,16 @@ static void mock_pdc(const struct nrf_modem_dect_phy_pdc_event *evt) // TODO mak
         i += knobs.uplink;
       }
 
-      // if (cnt < 1) // TODO rm
       k_msgq_put(&dectScheduleItemQueue, &schItem, K_NO_WAIT);
-
-      cnt++;
 
       //   LOG_DBG("ENQUEUED ITEM. %d/%d slots left", knobs.downlink, knobs.slotsPerBeacon);
     }
 
+    if (ptState != PT_STATE_WAIT_FOR_LATCH_BEACON)
+    {
+      LOG_WRN("FIRST BEACON RECEIVED. %d DL %d UL, %d SLOTS UNTIL NEXT BEACON. WAITING FOR LATCH AND ONWARDS", knobs.downlink, knobs.uplink, slotsUntilNextBeacon);
+    }
     ptState = PT_STATE_WAIT_FOR_LATCH_BEACON;
-    sw = true;
   }
   else
   {
@@ -138,17 +125,22 @@ static void mock_pdc(const struct nrf_modem_dect_phy_pdc_event *evt) // TODO mak
     }
   }
 
+  // DATA PROCESSING
   if (ptState > PT_STATE_WAIT_FOR_BEACON)
   {
-    // if (pkt->header.isData || pkt->header.isBeacon)
-    //   LOG_HEXDUMP_WRN(evt->data, evt->len, (pkt->header.isBeacon ? "PDC + B" : "PDC"));
+    // if (pkt->header.isData)
+    {
+      LOG_HEXDUMP_DBG(evt->data, evt->len, (pkt->header.isBeacon ? "PDC + B" : "PDC"));
+      LOG_DBG("FRAME SIZE %d TOP LEVEL HEADER PL SIZE %d", evt->len, pkt->header.payloadSize);
+      DectPhy_UnpackFrameAndProcessSDUs(evt->data, evt->len);
+    }
   }
 }
 
 static void mock_complete(const struct nrf_modem_dect_phy_op_complete_event *evt)
 {
   int err;
-  LOG_DBG("HANDLE %d COMPLETE", evt->handle);
+  LOG_DBG("HANDLE %d %s COMPLETE", evt->handle, IS_TX_HANDLE(evt->handle) ? "TX" : "RX");
   if (evt->err) /////////////////////////////////////// MODEM ERROR //////////////////////
   {
     LOG_ERR("%s ERROR %x HANDLE %d @ MT %llu", __FUNCTION__, evt->err, evt->handle, modem_time);
@@ -157,19 +149,6 @@ static void mock_complete(const struct nrf_modem_dect_phy_op_complete_event *evt
   if (IS_TX_HANDLE(evt->handle))
   {
     gpio_pin_toggle_dt(ptUlSwitch);
-    // gpio_pin_toggle_dt(ptUlSwitch);
-  }
-
-  if (ptState >= PT_STATE_WAIT_FOR_LATCH_BEACON)
-  {
-    DectScheduleItem_t it = (DectScheduleItem_t) {
-      .action = (IS_TX_HANDLE(evt->handle)) ? DECT_ACTION_DATA_TX : DECT_ACTION_DATA_RX,
-      .followedByLast = true,
-      .handle = evt->handle,
-      .headroom = DECT_HEADROOM,
-      .numSlots = (IS_TX_HANDLE(evt->handle)) ? knobs.uplink : knobs.downlink,
-    };
-    // k_msgq_put(&dectScheduleItemQueue, &it, K_NO_WAIT);
   }
 
   k_sem_give(&operation_sem);
