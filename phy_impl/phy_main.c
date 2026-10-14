@@ -561,7 +561,7 @@ static size_t DectPhy_PackMTU(DectPacket_t *frame, size_t frameSize, bool beacon
 
     LOG_DBG("~~ PACK FRAME LOOP %d. REMAINING BYTES IN THE FRAME %d ~~" , numSdusTouched, remainingFrameSize);
     numSdusTouched++; // TODO rm
-    if (numSdusTouched == 5)
+    if (numSdusTouched == 20)
     {
       LOG_ERR("INF LOOP. BREAKING");
       LOG_HEXDUMP_ERR(frame, frameSize, "POTENTIALLY BAD TX FRAME");
