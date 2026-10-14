@@ -65,6 +65,6 @@ sudo ip address flush dev $IFACENAME
 sudo ip route flush dev $IFACENAME
 sudo ip address add "$LOCAL_IP"/24 dev $IFACENAME
 sudo ip route add "$REMOTE_IP" dev $IFACENAME
-# sudo ip neigh add "$REMOTE_IP" lladdr "$REMOTE_MAC" dev "$IFACENAME"
+sudo ip neigh add "$REMOTE_IP" lladdr "$REMOTE_MAC" dev "$IFACENAME"
 # echo sudo ip neigh add "$REMOTE_IP" lladdr "$REMOTE_MAC" dev "$IFACENAME"
 

@@ -30,9 +30,9 @@ static void on_pdc(const struct nrf_modem_dect_phy_pdc_event *evt)
           );
 
 
-  if (pkt->header.isData)
+  if (pkt->header.isData) // since the FT wont get a packet that's only isBeacon, its safe to do this
   {
-    // DectPhy_UnpackFrameAndProcessSDUs(evt->data, evt->len); // TODO bring this back
+    DectPhy_UnpackFrameAndProcessSDUs(evt->data, evt->len); // TODO bring this back
   }
 }
 
@@ -113,8 +113,8 @@ static void on_time_get(const struct nrf_modem_dect_phy_time_get_event *evt)
     item.followedByLast = true;
     item.headroom = DECT_HEADROOM;
 
-    knobs.uplink = 1;
-    knobs.downlink = 1;
+    knobs.uplink = 4;
+    knobs.downlink = 4;
 
     knobs.beaconPeriod = DECT_CLUSTER_PERIOD_10MS;
     knobs.slotsPerBeacon = slotsPerClusterPeriod[knobs.beaconPeriod];
