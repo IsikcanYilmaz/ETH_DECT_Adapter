@@ -5,6 +5,8 @@ import sys
 import binascii
 import argparse
 
+import hexdump
+
 """
 Forge a custom IP Packet and send it to our w5500 interface 
 """
@@ -38,7 +40,8 @@ def main(iface=1, length=0, times=1):
     packet = Ether(src=sourceMAC, dst=destinationMAC,type=etherType) / IP(dst=destinationIP) / payload
 
     print("Hexdump:")
-    chexdump(packet)
+    # chexdump(packet)
+    hexdump.hexdump(raw(packet))
     print(f"\nPacket length {len(packet)}. Sending packet {times} times")
     srp([packet] * times, iface=ifacename, timeout=0)
 
