@@ -43,7 +43,7 @@ static void mock_pdc(const struct nrf_modem_dect_phy_pdc_event *evt) // TODO mak
     gpio_pin_toggle_dt(ptDlSwitch);
   }
   
-  if (pkt->header.isBeacon)
+  if (pkt->header.isBeacon && (evt->handle == BEACON_RX_HANDLE || evt->handle == BEACON_LATCH_RX_HANDLE))
   {
     // gpio_pin_toggle_dt(beaconTxSwitch);
     DectClusterBeaconMessage_t *beac = pkt->payload;

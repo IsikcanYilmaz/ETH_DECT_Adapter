@@ -51,8 +51,6 @@ static void on_complete(const struct nrf_modem_dect_phy_op_complete_event *evt)
   }
 
   DectScheduleItem_t item;
-  // k_msgq_get(&dectInFlightItemQueue, &item, K_NO_WAIT); // TODO Check for errors on these
-  // LOG_WRN("ON COMPLETE. HANDLE %d (%d). @ %llu expected %llu. diff %lli %s", evt->handle, item.handle, modem_time, item.expectedEndTime, (int64_t)(item.expectedEndTime - modem_time), (modem_time > item.expectedEndTime) ? "EXPECTED EARLIER" : "EXPECTED LATER");
 
   LOG_DBG("ON COMPLETE @ %llu HANDLE %d ", modem_time, evt->handle);
 
