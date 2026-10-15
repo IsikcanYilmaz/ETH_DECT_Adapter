@@ -561,7 +561,7 @@ static size_t DectPhy_PackMTU(DectPacket_t *frame, size_t frameSize, bool beacon
 
     LOG_DBG("~~ PACK FRAME LOOP %d. REMAINING BYTES IN THE FRAME %d ~~" , numSdusTouched, remainingFrameSize);
     numSdusTouched++; // TODO rm
-    if (numSdusTouched == 20)
+    if (numSdusTouched == 40) // todo bad solution
     {
       LOG_ERR("INF LOOP. BREAKING");
       LOG_HEXDUMP_ERR(frame, frameSize, "POTENTIALLY BAD TX FRAME");
@@ -1165,7 +1165,7 @@ static void DectPhy_SchedulerThread(void *p1, void *p2, void *p3)
     while(numInFlightActions >= DECT_MAX_IN_FLIGHT_ACTIONS) // TODO do this with semaphores
     {
       // LOG_ERR("WAITING FOR IN FLIGHT");
-      k_sleep(K_USEC(1));
+      k_sleep(K_USEC(10));
     }
 
     if (item.followedByLast)
@@ -1223,7 +1223,7 @@ void DectPhy_Main(bool master)
 
   k_msgq_init(&dectScheduleItemQueue, dectScheduleItemBuffer, sizeof(DectScheduleItem_t), DECT_SCHEDULE_QUEUE_NUM_ITEMS);
   k_msgq_init(&dectInFlightItemQueue, dectInFlightItemBuffer, sizeof(DectScheduleItem_t), DECT_IN_FLIGHT_QUEUE_NUM_ITEMS); // TODO this may not be needed after all
-  k_thread_create(&schedulerThreadHandle, schedulerThreadStack, 1024, DectPhy_SchedulerThread, NULL, NULL, NULL, K_PRIO_PREEMPT(7), 0, K_NO_WAIT);
+  k_thread_create(&schedulerThreadHandle, schedulerThreadStack, 1024, DectPhy_SchedulerThread, NULL, NULL, NULL, K_PRIO_COOP(7), 0, K_NO_WAIT);
   DectPhy_Init();
   int err;
   iAmFt = master;

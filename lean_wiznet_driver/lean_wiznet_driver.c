@@ -34,6 +34,11 @@ static const struct spi_dt_spec w5500_spi_handle = SPI_DT_SPEC_GET(W5500_NODE, S
 static const struct gpio_dt_spec w5500_rst_handle = GPIO_DT_SPEC_GET(DT_NODELABEL(w5500_rst), gpios);
 static const struct gpio_dt_spec w5500_int_handle = GPIO_DT_SPEC_GET(DT_NODELABEL(w5500_int), gpios);
 
+extern const struct gpio_dt_spec tp23Switch; // to measure timings 
+extern const struct gpio_dt_spec tp24Switch;
+const struct gpio_dt_spec *txSwitch = &tp23Switch;
+const struct gpio_dt_spec *rxSwitch = &tp23Switch;
+
 DEVICE_DECLARE(eth_w5500_phy_0);
 
 static struct LeanWiznet_runtime leanwiznet_0_runtime = { 
