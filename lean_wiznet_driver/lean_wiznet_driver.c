@@ -34,11 +34,6 @@ static const struct spi_dt_spec w5500_spi_handle = SPI_DT_SPEC_GET(W5500_NODE, S
 static const struct gpio_dt_spec w5500_rst_handle = GPIO_DT_SPEC_GET(DT_NODELABEL(w5500_rst), gpios);
 static const struct gpio_dt_spec w5500_int_handle = GPIO_DT_SPEC_GET(DT_NODELABEL(w5500_int), gpios);
 
-extern const struct gpio_dt_spec tp23Switch; // to measure timings 
-extern const struct gpio_dt_spec tp24Switch;
-const struct gpio_dt_spec *txSwitch = &tp23Switch;
-const struct gpio_dt_spec *rxSwitch = &tp23Switch;
-
 DEVICE_DECLARE(eth_w5500_phy_0);
 
 static struct LeanWiznet_runtime leanwiznet_0_runtime = { 
@@ -273,12 +268,6 @@ static struct LeanWiznet_Packet* w5500_rx(struct LeanWiznet_config *cfg, struct 
 
 	w5500_readbuf(cfg, off, header, 2); // From read pointer read 2 bytes
 	rx_len = sys_get_be16(header) - 2;
-  if (rx_len > LEAN_WIZNET_MAX_POSSIBLE_DATAGRAM_BYTES)
-  {
-    LOG_ERR("Something wrong with eth packet received from w5500. header says rx_len %d. dropping", rx_len);
-    k_mutex_unlock(&ctx->spi_mutex);
-    return NULL;
-  }
   
 	read_len = rx_len;
 	reader = off + 2;

@@ -176,7 +176,6 @@ uint64_t genericRelativeRxSchedule;
 
 static uint64_t lastOpStart;
 static uint64_t lastOpEnding;
-static volatile uint16_t numInFlightActions = 0;
 uint8_t systemFrameNumberCounter = 0;
 
 static volatile bool iAmFt;
@@ -210,7 +209,7 @@ K_SEM_DEFINE(time_sem, 0, 1);
 K_SEM_DEFINE(done_sem, 0, 1);
 K_SEM_DEFINE(resync_sem, 0, 1);
 
-K_SEM_DEFINE(in_flight_sem, 0, DECT_MAX_IN_FLIGHT_ACTIONS);
+K_SEM_DEFINE(in_flight_sem, DECT_MAX_IN_FLIGHT_ACTIONS, DECT_MAX_IN_FLIGHT_ACTIONS);
 
 // TODO Depricate
 bool DectPhy_PktIsBeacon(char *pkt)
@@ -951,7 +950,8 @@ static void dect_phy_event_handler(const struct nrf_modem_dect_phy_event *evt)
 		on_configure(&evt->configure);
 		break;
 	case NRF_MODEM_DECT_PHY_EVT_COMPLETED:
-    numInFlightActions -= (numInFlightActions) ? 1 : 0; // TODO maybe a better looking solution?
+    
+    k_sem_give(&in_flight_sem);
 
     // k_msgq_get(&dectInFlightItemQueue, &doneItem, K_NO_WAIT);
 
@@ -973,7 +973,6 @@ static void dect_phy_event_handler(const struct nrf_modem_dect_phy_event *evt)
     lastPccModemTick = modem_time;
     const struct nrf_modem_dect_phy_pcc_event *pccEvt = (const struct nrf_modem_dect_phy_pcc_event *) (&evt->pcc);
     lastPccStfStartTime = pccEvt->stf_start_time;
-    // numInFlightActions -= (numInFlightActions) ? 1 : 0;
 
     if (iAmFt)
     {
@@ -1105,7 +1104,6 @@ static int cmd_bridge(const struct shell *shell, size_t argc, char **argv)
     shell_print(shell, "I am : %s", (iAmFt) ? "FT" : "PT");
     shell_print(shell, "State: %d", (iAmFt) ? ftState : ptState);
     shell_print(shell, "Knobs: Mcs: %d BMcs: %d, carrier: %d, ops: %d", knobs.mcs, knobs.beaconMcs, knobs.carrier, knobs.ops_per_beacon);
-    shell_print(shell, "In flight: %d", numInFlightActions);
     DectPhy_PrintStatistics(shell);
     return 0;
   }
@@ -1149,11 +1147,8 @@ static void DectPhy_SchedulerThread(void *p1, void *p2, void *p3)
   while(true)
   {
     k_msgq_get(&dectScheduleItemQueue, &item, K_FOREVER);
-    while(numInFlightActions >= DECT_MAX_IN_FLIGHT_ACTIONS) // TODO do this with semaphores
-    {
-      // LOG_ERR("WAITING FOR IN FLIGHT");
-      k_sleep(K_USEC(10));
-    }
+
+    k_sem_take(&in_flight_sem, K_FOREVER); 
 
     if (item.followedByLast)
     {
@@ -1196,9 +1191,9 @@ static void DectPhy_SchedulerThread(void *p1, void *p2, void *p3)
         }
     }
 
-    numInFlightActions++;
     lastOpStart = item.effectiveStartTime;
     lastOpEnding = item.effectiveEndTime;
+
   }
 }
 
@@ -1215,8 +1210,10 @@ void DectPhy_Main(bool master)
 
   k_msgq_init(&dectScheduleItemQueue, dectScheduleItemBuffer, sizeof(DectScheduleItem_t), DECT_SCHEDULE_QUEUE_NUM_ITEMS);
   k_msgq_init(&dectInFlightItemQueue, dectInFlightItemBuffer, sizeof(DectScheduleItem_t), DECT_IN_FLIGHT_QUEUE_NUM_ITEMS); // TODO this may not be needed after all
+  
   k_thread_create(&schedulerThreadHandle, schedulerThreadStack, 1024, DectPhy_SchedulerThread, NULL, NULL, NULL, K_PRIO_COOP(7), 0, K_NO_WAIT);
-  k_thread_create(&schedulerThreadHandle, schedulerThreadStack, 1024, DectPhy_SchedulerThread, NULL, NULL, NULL, K_PRIO_COOP(7), 0, K_NO_WAIT);
+  // k_thread_create(&packerThreadHandle, packerThreadStack, 1024, DectPhy_PackerThread, NULL, NULL, NULL, K_PRIO_COOP(7), 0, K_NO_WAIT);
+  
   DectPhy_Init();
   int err;
   iAmFt = master;

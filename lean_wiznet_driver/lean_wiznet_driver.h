@@ -119,20 +119,10 @@ struct LeanWiznet_runtime {
 	uint8_t buf[1500]; // JON pound define
 };
 
-struct LeanWiznet_PacketFragment{
-  uint16_t remainingFragments;
-  char payload[];
-} __attribute__((packed));
-
 struct LeanWiznet_Packet{ // TODO Change name to LeanWiznetPacket_s or something
   uint32_t reserved; // k_queue_append uses the first 4 bytes of this for internal book keeping
   uint16_t size;
   char payload[];
-} __attribute__((packed));
-
-struct LeanWiznet_QueueItem {
-  uint32_t reserved;
-  struct LeanWiznet_Packet pkt;
 } __attribute__((packed));
 
 typedef void (*RxHappenedCallback)(void); // TODO maybe a more detailed callback? 
