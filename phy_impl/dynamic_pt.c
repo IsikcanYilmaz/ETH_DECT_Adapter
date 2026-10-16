@@ -128,12 +128,9 @@ static void mock_pdc(const struct nrf_modem_dect_phy_pdc_event *evt) // TODO mak
   // DATA PROCESSING
   if (ptState > PT_STATE_WAIT_FOR_BEACON)
   {
-    // if (pkt->header.isData)
-    {
-      LOG_HEXDUMP_DBG(evt->data, evt->len, (pkt->header.isBeacon ? "PDC + B" : "PDC"));
-      LOG_DBG("FRAME SIZE %d TOP LEVEL HEADER PL SIZE %d", evt->len, pkt->header.payloadSize);
-      DectPhy_UnpackFrameAndProcessSDUs(evt->data, evt->len);
-    }
+    LOG_HEXDUMP_DBG(evt->data, evt->len, (pkt->header.isBeacon ? "PDC + B" : "PDC"));
+    LOG_DBG("FRAME SIZE %d TOP LEVEL HEADER PL SIZE %d", evt->len, pkt->header.payloadSize);
+    DectPhy_UnpackFrameAndProcessSDUs(evt->data, evt->len);
   }
 }
 

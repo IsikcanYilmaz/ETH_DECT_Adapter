@@ -452,8 +452,6 @@ size_t DectPhy_UnpackFrameAndProcessSDUs(DectPacket_t *frame, size_t frameSize)
   int remainingFrameSize = frameSize;
   int numSdusInFrame = 0;
 
-  // int cnt = 0;
-
   // Skip MAC IEs and MTUs
   if (frame->header.isBeacon)
   {
@@ -487,12 +485,8 @@ size_t DectPhy_UnpackFrameAndProcessSDUs(DectPacket_t *frame, size_t frameSize)
 
     DectPhy_HandleSDUFragment((char *) currentSdu, currentSdu->header.payloadSize);
 
-    // cnt += sduPlusHeaderSize;
     currentSdu = (DectPacket_t *) ((uint8_t *) currentSdu + sduPlusHeaderSize);
   }
-
-  // if (cnt)
-  //   LOG_DBG("%d bytes", cnt);
 
   return 0;
 }
@@ -720,7 +714,6 @@ int DectPhy_TransmitHeadOfQueueArbitrarySize(uint32_t handle, uint8_t numSlots, 
 
   if (frameToTx)
   {
-    // memset(frameToTx, 0x00, txSize); // TEST TODO make sure this is not needed. This is here so that we know when a frame no longer has data
     numBytesToSend = DectPhy_PackMTU(frameToTx, txSize, includeBeacon);
   }
   else // Out of memory
@@ -1150,12 +1143,6 @@ SHELL_CMD_ARG_REGISTER(bridge, NULL, "bridge <subcommand>", cmd_bridge, 1, 32);
 
 struct k_thread schedulerThreadHandle;
 K_KERNEL_STACK_MEMBER(schedulerThreadStack, 1024); // TODO move these up
-int DectPhy_QueueNewAction(DectActionType_e action, uint8_t numSlots, uint64_t headroom)
-{
-  
-  return 0;
-}
-
 static void DectPhy_SchedulerThread(void *p1, void *p2, void *p3)
 {
   DectScheduleItem_t item;
@@ -1210,11 +1197,16 @@ static void DectPhy_SchedulerThread(void *p1, void *p2, void *p3)
     }
 
     numInFlightActions++;
-
     lastOpStart = item.effectiveStartTime;
-
     lastOpEnding = item.effectiveEndTime;
   }
+}
+
+struct k_thread packerThreadHandle;
+K_KERNEL_STACK_MEMBER(packerThreadStack, 1024); // TODO move these up
+void DectPhy_PackerThread(void *p1, void *p2, void *p3)
+{
+  
 }
 
 void DectPhy_Main(bool master)
@@ -1223,6 +1215,7 @@ void DectPhy_Main(bool master)
 
   k_msgq_init(&dectScheduleItemQueue, dectScheduleItemBuffer, sizeof(DectScheduleItem_t), DECT_SCHEDULE_QUEUE_NUM_ITEMS);
   k_msgq_init(&dectInFlightItemQueue, dectInFlightItemBuffer, sizeof(DectScheduleItem_t), DECT_IN_FLIGHT_QUEUE_NUM_ITEMS); // TODO this may not be needed after all
+  k_thread_create(&schedulerThreadHandle, schedulerThreadStack, 1024, DectPhy_SchedulerThread, NULL, NULL, NULL, K_PRIO_COOP(7), 0, K_NO_WAIT);
   k_thread_create(&schedulerThreadHandle, schedulerThreadStack, 1024, DectPhy_SchedulerThread, NULL, NULL, NULL, K_PRIO_COOP(7), 0, K_NO_WAIT);
   DectPhy_Init();
   int err;
