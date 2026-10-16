@@ -12,10 +12,22 @@
 LOG_MODULE_REGISTER(dect_phy_dpt, LOG_LEVEL_WRN);
 // ZASSERT_MODULE(dect_phy_dpt);
 
+uint8_t currentSystemFrameNumber = 0;
+uint8_t expectedNextSystemFrameNumber = 0;
+
 static void on_time_get_pt(const struct nrf_modem_dect_phy_time_get_event *evt)
 {
   warmedUp = true;
-  DectPhy_Receive(BEACON_RX_HANDLE, 0xffffffff, 0);
+  // First Beacon
+  DectScheduleItem_t schItem = (DectScheduleItem_t) {
+    .action = DECT_ACTION_FIRST_BEACON_RX, 
+    .handle = BEACON_RX_HANDLE, 
+    .numSlots = 0xffffffff,
+    .effectiveStartTime = 0,
+    .followedByLast = true,
+    .headroom = DECT_HEADROOM,
+  };
+  k_msgq_put(&dectScheduleItemQueue, &schItem, K_NO_WAIT);
   ptState = PT_STATE_WAIT_FOR_BEACON;
   LOG_WRN("WAITING FOR FIRST BEACON");
   k_sem_give(&time_sem);
@@ -43,7 +55,7 @@ static void mock_pdc(const struct nrf_modem_dect_phy_pdc_event *evt) // TODO mak
     gpio_pin_toggle_dt(ptDlSwitch);
   }
   
-  if (pkt->header.isBeacon && (evt->handle == BEACON_RX_HANDLE || evt->handle == BEACON_LATCH_RX_HANDLE))
+  if (pkt->header.isBeacon && (evt->handle == BEACON_RX_HANDLE || IS_LATCH_BEACON_HANDLE(evt->handle)))
   {
     // gpio_pin_toggle_dt(beaconTxSwitch);
     DectClusterBeaconMessage_t *beac = pkt->payload;
@@ -67,10 +79,13 @@ static void mock_pdc(const struct nrf_modem_dect_phy_pdc_event *evt) // TODO mak
     knobs.beaconPeriod = beac->period.clusterBeaconPeriod;
     knobs.slotsPerBeacon = slotsPerClusterPeriod[knobs.beaconPeriod];
 
+    currentSystemFrameNumber = beac->systemFrameNumber;
+    expectedNextSystemFrameNumber = currentSystemFrameNumber + 1;
+
     // Next Beacon
     DectScheduleItem_t schItem = (DectScheduleItem_t) {
       .action = DECT_ACTION_BEACON_RX, 
-      .handle = BEACON_LATCH_RX_HANDLE, // + beac->systemFrameNumber, 
+      .handle = BEACON_LATCH_RX_HANDLE + beac->systemFrameNumber, 
       .numSlots = knobs.downlink,
       .effectiveStartTime = modem_time + ticksUntilNextBeacon,
       .followedByLast = false,
@@ -111,11 +126,11 @@ static void mock_pdc(const struct nrf_modem_dect_phy_pdc_event *evt) // TODO mak
       //   LOG_DBG("ENQUEUED ITEM. %d/%d slots left", knobs.downlink, knobs.slotsPerBeacon);
     }
 
-    if (ptState != PT_STATE_WAIT_FOR_LATCH_BEACON)
+    if (ptState == PT_STATE_WAIT_FOR_BEACON && pkt->header.isBeacon)
     {
       LOG_WRN("FIRST BEACON RECEIVED. %d DL %d UL, %d SLOTS UNTIL NEXT BEACON. WAITING FOR LATCH AND ONWARDS", knobs.downlink, knobs.uplink, slotsUntilNextBeacon);
+      ptState = PT_STATE_WAIT_FOR_LATCH_BEACON;
     }
-    ptState = PT_STATE_WAIT_FOR_LATCH_BEACON;
   }
   else
   {
@@ -146,6 +161,22 @@ static void mock_complete(const struct nrf_modem_dect_phy_op_complete_event *evt
   if (IS_TX_HANDLE(evt->handle))
   {
     gpio_pin_toggle_dt(ptUlSwitch);
+  }
+
+  if (ptState == PT_STATE_WAIT_FOR_LATCH_BEACON && IS_LATCH_BEACON_HANDLE(evt->handle) && ((uint8_t) evt->handle != expectedNextSystemFrameNumber))
+  {
+    LOG_ERR("DESYNCRONIZED! HANDLE %d, CURRENT SFN %d, EXPECTED %d", evt->handle, currentSystemFrameNumber, expectedNextSystemFrameNumber);
+    // TODO Would be nice here to drain all queues and such
+    DectScheduleItem_t schItem = (DectScheduleItem_t) {
+      .action = DECT_ACTION_FIRST_BEACON_RX, 
+      .handle = BEACON_RX_HANDLE, 
+      .numSlots = 0xffffffff,
+      .effectiveStartTime = 0,
+      .followedByLast = true,
+      .headroom = DECT_HEADROOM,
+    };
+    k_msgq_put(&dectScheduleItemQueue, &schItem, K_NO_WAIT);
+    ptState = PT_STATE_WAIT_FOR_BEACON;
   }
 
   k_sem_give(&operation_sem);

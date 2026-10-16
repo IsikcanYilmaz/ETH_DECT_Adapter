@@ -732,6 +732,7 @@ int DectPhy_TransmitHeadOfQueueArbitrarySize(uint32_t handle, uint8_t numSlots, 
       currentTxDatagramTag++;
       currentTxDatagramRemainingBytes = 0;
     }
+
     DectPhy_DropQueuedPacket(1);
   }
   
@@ -1169,19 +1170,22 @@ static void DectPhy_SchedulerThread(void *p1, void *p2, void *p3)
     switch(item.action)
     {
       case DECT_ACTION_BEACON_TX:
-        {
-          DectPhy_TransmitHeadOfQueueArbitrarySize(item.handle, item.numSlots, true, item.scheduleStartTime);
-          break;
-        }
       case DECT_ACTION_DATA_TX:
         {
-          DectPhy_TransmitHeadOfQueueArbitrarySize(item.handle, item.numSlots, false, item.scheduleStartTime);
+          DectPhy_TransmitHeadOfQueueArbitrarySize(item.handle, item.numSlots, (item.action == DECT_ACTION_BEACON_TX), item.scheduleStartTime);
           break;
         }
       case DECT_ACTION_DATA_RX:
       case DECT_ACTION_BEACON_RX:
         {
           DectPhy_Receive(item.handle, (item.numSlots * DECT_SLOT_DURATION_TICK) + (2*item.headroom) , item.scheduleStartTime);
+          break;
+        }
+      case DECT_ACTION_FIRST_BEACON_RX: // This is for the PT only
+        {
+          DectPhy_Receive(BEACON_RX_HANDLE, 0xffffffff, item.scheduleStartTime);
+          item.effectiveStartTime = 0;
+          item.effectiveStartTime = 0;
           break;
         }
       default:
@@ -1201,7 +1205,6 @@ struct k_thread packerThreadHandle;
 K_KERNEL_STACK_MEMBER(packerThreadStack, 1024); // TODO move these up
 void DectPhy_PackerThread(void *p1, void *p2, void *p3)
 {
-  
 }
 
 void DectPhy_Main(bool master)
